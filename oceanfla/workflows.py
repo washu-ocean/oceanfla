@@ -3,17 +3,17 @@ from nipype.interfaces.io import BIDSDataGrabber
 from nipype.interfaces.utility import IdentityInterface
 from niworkflows.utils.bids import collect_participants
 from niworkflows.interfaces.bids import DerivativesDataSink
-from oceanproc.firstlevel.interfaces.clean import FilterData, PercentChange
-from oceanproc.firstlevel.interfaces.events import EventsMatrix, GetVolumeCount
-from oceanproc.firstlevel.interfaces.exclusions import CheckRunRetention, CheckRuntSNR
-from oceanproc.firstlevel.interfaces.nuisance import GenerateNuisanceMatrix
-from oceanproc.firstlevel.interfaces.regression import ConcatRegressionData, RunGLMRegression
-from oceanproc.firstlevel.interfaces.tmask import MakeTmask
-from oceanproc.firstlevel.interfaces.utility import MergeUnique, ExtractDataGroup
-from pathlib import Path
-from .config import all_opts
-from . import utilities
+from oceanfla.interfaces.clean import FilterData, PercentChange
+from oceanfla.interfaces.events import EventsMatrix, GetVolumeCount
+from oceanfla.interfaces.exclusions import CheckRunRetention, CheckRuntSNR
+from oceanfla.interfaces.nuisance import GenerateNuisanceMatrix
+from oceanfla.interfaces.regression import ConcatRegressionData, RunGLMRegression
+from oceanfla.interfaces.tmask import MakeTmask
+from oceanfla.interfaces.utility import MergeUnique, ExtractDataGroup
+from oceanfla.config import all_opts
+from oceanfla.utilities import parse_session_bold_files
 from bids.utils import listify
+from pathlib import Path
 
 
 '''
@@ -96,7 +96,7 @@ def build_session_wf(subject, session=None):
     # input_node.inputs.subject = subject
     # input_node.inputs.session = session
 
-    space_run_info = utilities.parse_session_bold_files(layout=all_opts.preproc_layout,
+    space_run_info = parse_session_bold_files(layout=all_opts.preproc_layout,
                                                         subject=subject,
                                                         session=session,
                                                         tasks=all_opts.task)
@@ -233,8 +233,6 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
                 ),
                 name=f"extract_task_{task}_run_{run}_group_node"
             )
-            # if source_node is None:
-            #     source_node = extract_task_run_group_node
 
             # Connect the files to the run-level workflow
             workflow.connect([

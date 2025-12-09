@@ -1,8 +1,8 @@
 import argparse
 from pathlib import Path
-from .oceanparse import OceanParser
+from oceanfla.oceanparse import OceanParser
 import logging
-from .utilities import export_args_to_file
+from oceanfla.utilities import export_args_to_file
 import bids
 
 VERSION = "1.1.4"

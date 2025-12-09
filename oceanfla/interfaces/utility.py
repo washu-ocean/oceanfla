@@ -114,7 +114,7 @@ def extract_task_run_group(bold_list: list,
                            events_list: list,
                            task_needed: str,
                            run_needed: int):
-    from oceanproc.firstlevel.config import get_bids_file
+    from oceanfla.config import get_bids_file
     run_dict = {
         "bold": None,
         "confounds": None,
