@@ -13,7 +13,7 @@ cifti_files = [
     ".dtseries.nii",
     ".ptseries.nii",
     ".dscalar.nii",
-    ".pscalar.nii"
+    ".pscalar.nii",
 ]
 
 

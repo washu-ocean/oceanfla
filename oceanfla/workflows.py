@@ -1,8 +1,9 @@
 from nipype import Node, Workflow, Function
 from nipype.interfaces.io import BIDSDataGrabber
-from nipype.interfaces.utility import IdentityInterface
+from nipype.interfaces.utility import IdentityInterface, Select
 from niworkflows.utils.bids import collect_participants
 from niworkflows.interfaces.bids import DerivativesDataSink
+from oceanfla.interfaces import workbench_utils
 from oceanfla.interfaces.clean import FilterData, PercentChange
 from oceanfla.interfaces.events import EventsMatrix, GetVolumeCount
 from oceanfla.interfaces.exclusions import CheckRunRetention, CheckRuntSNR
@@ -11,9 +12,11 @@ from oceanfla.interfaces.regression import ConcatRegressionData, RunGLMRegressio
 from oceanfla.interfaces.tmask import MakeTmask
 from oceanfla.interfaces.utility import MergeUnique, ExtractDataGroup
 from oceanfla.config import all_opts
-from oceanfla.utilities import parse_session_bold_files
+from oceanfla.interfaces.workbench_utils import SurfaceSmooth, VolumeSmooth
+from oceanfla.utilities import is_cifti_file, is_nifti_file, parse_session_bold_files
 from bids.utils import listify
 from pathlib import Path
+from bids.layout import parse_file_entities
 
 
 '''
@@ -223,7 +226,7 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
         for run in run_list:
             run_level_wf = build_run_workflow(run=run,
                                               task=task,
-                                              compress_files=file_extension.endswith(".gz"))
+                                              file_extension=file_extension)
 
             # Define a node to extract the run-specific files from the data-grabbers
             extract_task_run_group_node = Node(
@@ -236,6 +239,10 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
 
             # Connect the files to the run-level workflow
             workflow.connect([
+                (input_node, run_level_wf, [
+                    ("subject", "subject"),
+                    ("session", "session"),
+                ]),
                 (derivs_grabber, extract_task_run_group_node, [
                     ("bold", "bold_list"),
                     ("confounds", "confounds_list")
@@ -338,7 +345,7 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
     return workflow
 
 
-def build_run_workflow(run, task: str, compress_files=False):
+def build_run_workflow(run, task: str, file_extension:str):
     from oceanproc.firstlevel.interfaces.nuisance import make_regressor_run_specific
 
     ### Define the workflow and the inputnode ###
@@ -346,6 +353,8 @@ def build_run_workflow(run, task: str, compress_files=False):
     inputnode = Node(
         IdentityInterface(
             fields=[
+                "subject",
+                "session",
                 "bold_file",
                 "confounds_file",
                 "events_file",
@@ -365,6 +374,7 @@ def build_run_workflow(run, task: str, compress_files=False):
         ),
         name="outputnode"
     )
+    compress_files = file_extension.endswith(".gz")
 
     ### Create run-level temporal mask ###
     tmask_node = Node(
@@ -516,6 +526,43 @@ def build_run_workflow(run, task: str, compress_files=False):
             ])
         ])
 
+
+    ### Smooth the data if requested ###
+    if all_opts.fwhm:
+        smoothing_wf = build_smoothing_wf(
+            run=run, task=task, file_extension=file_extension)
+
+        workflow.connect([
+            (inputnode, smoothing_wf, [
+                ("subject", "inputnode.subject"),
+                ("session", "inputnode.session")
+            ]),
+            (last_func_node, smoothing_wf, [
+                ("bold_file", "inputnode.bold_file")
+            ]),
+        ])
+        last_func_node = smoothing_wf.get_node("outputnode")
+        
+        if all_opts.debug:
+            smoothed_ds = Node(DerivativesDataSink(
+                    base_directory=all_opts.output_dir,
+                    compress=compress_files,
+                    desc="smooth",
+                    allowed_entities=("fwhm"),
+                    fwhm=str(all_opts.fwhm).replace(".","p")
+                ),
+                name = "smoothed_bold_ds"
+            )
+            workflow.connect([
+                (smoothing_wf, smoothed_ds, [
+                    ("outputnode.bold_file", "in_file"),
+                ]),
+                (inputnode, smoothed_ds, [
+                    ("bold_file", "source_file")
+                ])
+            ])
+
+
     ### Percent signal change ###
     if all_opts.percent_change:
         # make psc node
@@ -551,6 +598,7 @@ def build_run_workflow(run, task: str, compress_files=False):
                     ("bold_file", "source_file")
                 ])
             ])
+
 
     ### Nuisance regression ###
     if all_opts.nuisance_regression:
@@ -645,6 +693,7 @@ def build_run_workflow(run, task: str, compress_files=False):
             ])
         ])
 
+
     ### Bandpass filter ###
     if all_opts.highpass or all_opts.lowpass:
 
@@ -689,6 +738,7 @@ def build_run_workflow(run, task: str, compress_files=False):
             ])
 
         last_func_node = filter_node
+
 
     ### Connect final bold output ###
     workflow.connect([
@@ -868,3 +918,124 @@ def build_exclusion_wf(run, task):
 
 
 
+def build_smoothing_wf(run, task: str, file_extension:str):
+
+    ### Define the workflow and the inputnode ###
+    geom_label = "surface" if is_cifti_file(file_extension) else "volume"
+    workflow = Workflow(name=f"task_{task}_run_{run}_{geom_label}_smoothing_wf")
+    inputnode = Node(
+        IdentityInterface(
+            fields=[
+                "subject",
+                "session",
+                "bold_file",
+            ]
+        ),
+        name="inputnode"
+    )
+    outputnode = Node(
+        IdentityInterface(
+            fields=[
+                "bold_file",
+            ]
+        ),
+        name="outputnode"
+    )
+
+    if is_cifti_file(file_extension):
+        surf_grabber = Node(
+            BIDSDataGrabber(
+                base_dir=all_opts.preproc_bids,
+                datatype='anat',
+                raise_on_empty = True,
+                output_query={
+                    'lh': {
+                        'suffix': 'midthickness',
+                        'space': ["fsLR", "dhcpAsym"],
+                        'extension': 'surf.gii',
+                        'hemi': 'L'
+                    },
+                    'rh':{
+                        'suffix': 'midthickness',
+                        'space': ["fsLR", "dhcpAsym"],
+                        'extension': 'surf.gii',
+                        'hemi': 'R'
+                    }
+                },
+                load_layout=all_opts.preproc_layout._root / ".bids_indexer"
+            ),
+            name="surf_grabber_node"
+        )
+
+        lh_list_select_node = Node(
+            Select(
+                index=0
+            ),
+            name="lh_select_first_node"
+        )
+        rh_list_select_node = Node(
+            Select(
+                index=0
+            ),
+            name="rh_select_first_node"
+        )
+
+        surface_smooth_node = Node(
+            SurfaceSmooth(
+                sigma_surf=all_opts.fwhm,
+                sigma_vol=all_opts.fwhm,
+                direction = "COLUMN",
+                fwhm = True,
+            ),
+            name="surface_smooth_node"
+        )
+
+        workflow.connect([
+            (inputnode, surf_grabber, [
+                ("subject", "subject"),
+                ("session", "session")
+            ]),
+            (surf_grabber, lh_list_select_node, [
+                ("lh", "inlist")
+            ]),
+            (surf_grabber, rh_list_select_node, [
+                ("rh", "inlist")
+            ]),
+            (inputnode, surface_smooth_node, [
+                ("bold_file", "in_file")
+            ]),
+            (lh_list_select_node, surface_smooth_node, [
+                ("out", "left_surf")
+            ]),
+            (rh_list_select_node, surface_smooth_node, [
+                ("out", "right_surf")
+            ]),
+            (surface_smooth_node, outputnode, [
+                ("out_file", "bold_file")
+            ])
+        ])
+
+    elif is_nifti_file(file_extension):
+        volume_smooth_node = Node(
+            VolumeSmooth(
+                kernel=all_opts.fwhm,
+                fwhm=True,
+            ),
+            name="volume_smooth_node"
+        )
+
+        workflow.connect([
+            (inputnode, volume_smooth_node, [
+                ("bold_file", "volume_in")
+            ]),
+            (volume_smooth_node, outputnode, [
+                ("volume_out", "bold_file")
+            ])
+        ])
+
+    return workflow
+
+
+        
+
+        

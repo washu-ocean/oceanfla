@@ -12,15 +12,13 @@ ncfg.update_config(
 )
 
 def main():
-
-    work_dir = "/Users/agardr/Desktop/python_code/test_bids_data/work"
+    # work_dir = "/Users/agardr/Desktop/python_code/test_bids_data/work"
     parse_args()
     from .config import all_opts
     from .workflows import build_oceanfla_wf
 
     oceanfla_wf = build_oceanfla_wf(
         subjects=all_opts.subject,
-        base_dir=work_dir
+        base_dir=all_opts.work_dir
     )
-
     oceanfla_wf.run()

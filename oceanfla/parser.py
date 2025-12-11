@@ -164,9 +164,12 @@ def _build_parser():
 
     config_arguments.add_argument("--output_dir", "-o", type=ExistingDir,
                                   help="Alternate Path to a directory to store the results of this analysis. Default is '[derivs_dir]/first_level/'")
+    
+    config_arguments.add_argument("--work_dir", "-w", type=ExistingDir,
+                                  help="Path to a working directory to store intermediate outputs")
 
-    config_arguments.add_argument("--custom_desc", "-cd",
-                                  help="A custom description to add in the file name of every output file.")
+    # config_arguments.add_argument("--custom_desc", "-cd",
+    #                               help="A custom description to add in the file name of every output file.")
 
     config_arguments.add_argument("--fir", "-ff", type=AboveZeroInt,
                                   help="The number of frames to use in an FIR model.")
