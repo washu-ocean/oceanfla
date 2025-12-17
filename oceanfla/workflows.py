@@ -9,14 +9,15 @@ from oceanfla.interfaces.events import EventsMatrix, GetVolumeCount
 from oceanfla.interfaces.exclusions import CheckRunRetention, CheckRuntSNR
 from oceanfla.interfaces.nuisance import GenerateNuisanceMatrix
 from oceanfla.interfaces.regression import ConcatRegressionData, RunGLMRegression
-from oceanfla.interfaces.tmask import MakeTmask
+from oceanfla.interfaces.tmask import MakeTmask, MakeTmaskTsv
 from oceanfla.interfaces.utility import MergeUnique, ExtractDataGroup
 from oceanfla.config import all_opts
 from oceanfla.interfaces.workbench_utils import SurfaceSmooth, VolumeSmooth
 from oceanfla.utilities import is_cifti_file, is_nifti_file, parse_session_bold_files
 from bids.utils import listify
 from pathlib import Path
-from bids.layout import parse_file_entities
+from datetime import datetime
+# from bids.layout import parse_file_entities
 
 
 '''
@@ -44,18 +45,27 @@ workflows as children that combine outputs to form a single regression workflow 
 space.
 '''
 
+def print_timestamp(msg):
+    print(f"{msg} --> {datetime.now()}")
 
-def build_oceanfla_wf(subjects: list[str] | None, base_dir=Path | str):
+def build_oceanfla_wf(subjects: list[str] | str | None, base_dir=Path | str):
 
     tasks = all_opts.task
     wf_name = f"oceanfla_tasks_{'-'.join(tasks)}_wf"
     fla_wf = Workflow(name=wf_name, base_dir=base_dir)
-    # fla_wf.base_dir = all_opts.work_dir
 
+    # fla_wf.base_dir = all_opts.work_dir
+    # print_timestamp("Collecting all subjects")
+    # all_subjects = set(all_opts.preproc_layout.get_subjects())
+    # print_timestamp("finished collecting all subjects")
+
+    print_timestamp("Collecting participants")
     subject_list = collect_participants(
         bids_dir=all_opts.preproc_layout,
         participant_label=listify(subjects)
     )
+    print(subject_list)
+    print_timestamp("finished collecting participants")
 
     start_node = Node(
         IdentityInterface(
@@ -72,6 +82,12 @@ def build_oceanfla_wf(subjects: list[str] | None, base_dir=Path | str):
         for ses in sessions:
             ses_wf = build_session_wf(subject=sub,
                                       session=ses)
+            ses_log_dir = all_opts.output_dir / f"sub-{sub}/{f'ses-{ses}/' if ses else ''}log"
+            ses_log_dir.mkdir(exist_ok=True, parents=True)
+            ses_wf.config['logging'] = {
+                'log_directory': str(ses_log_dir),
+                'log_to_file': True
+            }
             fla_wf.connect([
                 (start_node, ses_wf, [
                     ("task", "inputnode.task")
@@ -96,8 +112,8 @@ def build_session_wf(subject, session=None):
         ),
         name="inputnode"
     )
-    # input_node.inputs.subject = subject
-    # input_node.inputs.session = session
+    input_node.inputs.subject = subject
+    input_node.inputs.session = session
 
     space_run_info = parse_session_bold_files(layout=all_opts.preproc_layout,
                                                         subject=subject,
@@ -112,7 +128,7 @@ def build_session_wf(subject, session=None):
         (input_node, func_space_wf, [
             ("subject", "inputnode.subject"),
             ("session", "inputnode.session"),
-            ("session", "inputnode.task"),
+            ("task", "inputnode.task"),
         ])
     ])
 
@@ -152,15 +168,15 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
         name="inputnode"
     )
 
-    output_node = Node(
-        IdentityInterface(
-            fields=[
-                "beta_files",
+    # output_node = Node(
+    #     IdentityInterface(
+    #         fields=[
+    #             "beta_files",
 
-            ]
-        ),
-        name="outputnode"
-    )
+    #         ]
+    #     ),
+    #     name="outputnode"
+    # )
 
     # Define the data grabber nodes to find the relevant files
     derivs_grabber = Node(
@@ -240,8 +256,8 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
             # Connect the files to the run-level workflow
             workflow.connect([
                 (input_node, run_level_wf, [
-                    ("subject", "subject"),
-                    ("session", "session"),
+                    ("subject", "inputnode.subject"),
+                    ("session", "inputnode.session"),
                 ]),
                 (derivs_grabber, extract_task_run_group_node, [
                     ("bold", "bold_list"),
@@ -275,7 +291,7 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
             ("tmask_file", "inputnode.tmask_files"),
             ("design_matrix", "inputnode.event_matrices"),
             ("nuisance_matrix", "inputnode.nuisance_matrices"),
-            ("include_in_regression", "inclusion_list")
+            ("include_in_regression", "inputnode.inclusion_list")
         ])
     ])
 
@@ -284,9 +300,10 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
     task_name = "-".join(run_map.keys())
     beta_weights_ds = Node(
         DerivativesDataSink(
-            base_directory=all_opts.output_dir,
+            base_directory=all_opts.derivs_dir,
+            out_path_base=all_opts.derivs_subfolder,
             compress=need_compress,
-            dismiss_entities=["desc", "run"],
+            dismiss_entities=["desc", "run", "den"],
             suffix="boldmap",
             stat="effect",
             task=task_name,
@@ -306,10 +323,11 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
 
     design_matrix_ds = Node(
         DerivativesDataSink(
-            base_directory=all_opts.output_dir,
+            base_directory=all_opts.derivs_dir,
+            out_path_base=all_opts.derivs_subfolder,
             dismiss_entities=["run"],
-            des="final",
-            suffix="design",
+            desc="finalDesign",
+            suffix="timeseries",
             task=task_name,
         ),
         name=f"{func_space}_design_matrix_ds"
@@ -325,9 +343,10 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
 
     residual_bold_ds = Node(
         DerivativesDataSink(
-            base_directory=all_opts.output_dir,
+            base_directory=all_opts.derivs_dir,
+            out_path_base=all_opts.derivs_subfolder,
             compress=need_compress,
-            dismiss_entities=["run"],
+            dismiss_entities=["run", "den"],
             desc="glmResidual",
             task=task_name,
         ),
@@ -346,10 +365,11 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
 
 
 def build_run_workflow(run, task: str, file_extension:str):
-    from oceanproc.firstlevel.interfaces.nuisance import make_regressor_run_specific
+    from oceanfla.interfaces.nuisance import make_regressor_run_specific
 
     ### Define the workflow and the inputnode ###
     workflow = Workflow(name=f"task_{task}_run_{run}_processsing_wf")
+    print_timestamp(f"building run workflow {workflow.name}")
     inputnode = Node(
         IdentityInterface(
             fields=[
@@ -413,8 +433,9 @@ def build_run_workflow(run, task: str, file_extension:str):
         if known_tr:
             return known_tr
         else:
-            from oceanproc.firstlevel.config import get_bids_file
-            return get_bids_file(file).entities["RepetitionTime"]
+            from oceanfla.config import get_bids_file, get_layout_for_file
+            return get_layout_for_file(file).get_tr(get_bids_file(file))
+            # return get_bids_file(file).entities["RepetitionTime"]
 
     extract_tr_node = Node(
         Function(
@@ -481,8 +502,11 @@ def build_run_workflow(run, task: str, file_extension:str):
     if all_opts.debug:
         # save out the working files
         event_matrix_ds = Node(DerivativesDataSink(
-            base_directory=all_opts.output_dir,
-            desc="long"
+                base_directory=all_opts.derivs_dir,
+                out_path_base=all_opts.derivs_subfolder,
+                # allowed_entities=("desc"),
+                desc="modeledEvents",
+                suffix="timeseries"
             ),
             name="event_matrix_ds"
         )
@@ -496,7 +520,8 @@ def build_run_workflow(run, task: str, file_extension:str):
         ])
 
         nuisance_matrix_ds = Node(DerivativesDataSink(
-            base_directory=all_opts.output_dir,
+            base_directory=all_opts.derivs_dir,
+            out_path_base=all_opts.derivs_subfolder,
             desc="nuisance"
             ),
             name="nuisance_matrix_ds"
@@ -509,20 +534,28 @@ def build_run_workflow(run, task: str, file_extension:str):
                 ("nuisance_matrix", "in_file")
             ])
         ])
-
+        
+        make_tmask_tsv_node = Node(
+            MakeTmaskTsv,
+            name="make_tmask_tsv_node"
+        )
+        make_tmask_tsv_node.inputs.fd_threshold = all_opts.fd_threshold
         tmask_ds = Node(DerivativesDataSink(
-            base_directory=all_opts.output_dir,
-            desc="temporal",
-            suffix="mask"
+            base_directory=all_opts.derivs_dir,
+            out_path_base=all_opts.derivs_subfolder,
+            desc="temporalMask",
             ),
             name="tmask_ds"
         )
         workflow.connect([
+            (tmask_node, make_tmask_tsv_node, [
+                ("tmask_file", "tmask_file")
+            ]),
             (inputnode, tmask_ds, [
                 ("confounds_file", "source_file")
             ]),
-            (tmask_node, tmask_ds, [
-                ("tmask_file", "in_file")
+            (make_tmask_tsv_node, tmask_ds, [
+                ("tmask_tsv", "in_file")
             ])
         ])
 
@@ -545,8 +578,10 @@ def build_run_workflow(run, task: str, file_extension:str):
         
         if all_opts.debug:
             smoothed_ds = Node(DerivativesDataSink(
-                    base_directory=all_opts.output_dir,
+                    base_directory=all_opts.derivs_dir,
+                    out_path_base=all_opts.derivs_subfolder,
                     compress=compress_files,
+                    dismiss_entities=["den"],
                     desc="smooth",
                     allowed_entities=("fwhm"),
                     fwhm=str(all_opts.fwhm).replace(".","p")
@@ -584,8 +619,10 @@ def build_run_workflow(run, task: str, file_extension:str):
         last_func_node = percent_change_node
         if all_opts.debug:
             percent_change_ds = Node(DerivativesDataSink(
-                    base_directory=all_opts.output_dir,
+                    base_directory=all_opts.derivs_dir,
+                    out_path_base=all_opts.derivs_subfolder,
                     compress=compress_files,
+                    dismiss_entities=["den"],
                     desc="psc",
                 ),
                 name="percent_change_bold_ds"
@@ -631,8 +668,10 @@ def build_run_workflow(run, task: str, file_extension:str):
 
         if all_opts.debug:
             regressed_bold_ds = Node(DerivativesDataSink(
-                    base_directory=all_opts.output_dir,
+                    base_directory=all_opts.derivs_dir,
+                    out_path_base=all_opts.derivs_subfolder,
                     compress=compress_files,
+                    dismiss_entities=["den"],
                     desc="nuisanceRegressed"
                 ),
                 name="regressed_bold_ds"
@@ -647,12 +686,13 @@ def build_run_workflow(run, task: str, file_extension:str):
             ])
 
             nuisance_betas_ds = Node(DerivativesDataSink(
-                    base_directory=all_opts.output_dir,
+                    base_directory=all_opts.derivs_dir,
+                    out_path_base=all_opts.derivs_subfolder,
                     compress=compress_files,
-                    dismiss_entities=["desc"],
+                    desc="nuisanceRegression",
                     suffix="boldmap",
                     stat="effect",
-                    allowed_entities=("condition", "stat")
+                    allowed_entities=("condition", "stat", "den")
                 ),
                 name="nuisance_betas_ds"
             )
@@ -667,10 +707,11 @@ def build_run_workflow(run, task: str, file_extension:str):
             ])
 
             design_file_ds = Node(DerivativesDataSink(
-                    base_directory=all_opts.output_dir,
+                    base_directory=all_opts.derivs_dir,
+                    out_path_base=all_opts.derivs_subfolder,
                     compress=compress_files,
-                    desc="nuisance",
-                    suffix="design"
+                    desc="nuisanceRegression",
+                    suffix="timeseries"
                 ),
                 name="design_file_ds"
             )
@@ -722,12 +763,20 @@ def build_run_workflow(run, task: str, file_extension:str):
 
         if all_opts.debug:
             filter_ds = Node(DerivativesDataSink(
-                base_directory=all_opts.output_dir,
+                base_directory=all_opts.derivs_dir,
+                out_path_base=all_opts.derivs_subfolder,
                 compress=compress_files,
-                desc=f"filtered{'-hp' + str(all_opts.highpass) if all_opts.highpass else ''}{'-lp' + str(all_opts.lowpass) if all_opts.lowpass else ''}",
+                allowed_entites=("hp", "lp"),
+                dismiss_entities=["den"],
+                desc="filtered",
                 ),
                 name="filtered_bold_ds"
             )
+            if all_opts.highpass:
+                filter_ds.inputs.hp = str(all_opts.highpass).replace(".", "p")
+            if all_opts.lowpass:
+                filter_ds.inputs.lp = str(all_opts.lowpass).replace(".", "p")
+
             workflow.connect([
                 (filter_node, filter_ds, [
                     ("bold_file", "in_file")
@@ -883,9 +932,10 @@ def build_exclusion_wf(run, task):
         name="merge_validations_node"
     )
 
+    and_all_func = lambda validation_list : all(validation_list)
     check_validation_node = Node(
         Function(
-            function=all,
+            function=and_all_func,
             input_names=["validation_list"],
             output_names="include"
         ),

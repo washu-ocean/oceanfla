@@ -81,16 +81,16 @@ class ConcatRegressionDataInputSpec(BaseInterfaceInputSpec):
     )
 
     event_matrices = traits.Union(
+        None,
         traits.List(trait=traits.File(exists=True)),
         traits.File(exists=True),
-        None,
         desc="A list of event matrix files"
     )
 
     nuisance_matrices = traits.Union(
+        None,
         traits.List(trait=traits.File(exists=True)),
         traits.File(exists=True),
-        None,
         desc="A list of nuisance matrix files"
     )
 
@@ -101,15 +101,15 @@ class ConcatRegressionDataInputSpec(BaseInterfaceInputSpec):
     )
 
     regressor_columns = traits.Union(
-        traits.List(trait=traits.Str),
         None,
+        traits.List(trait=traits.Str),
         default_value=None,
         desc="A list of column names to be used from the nuisance matrices."
     )
 
     inclusion_list = traits.Union(
-        traits.List(trait=traits.Bool),
         None,
+        traits.List(trait=traits.Bool),
         default_value=None,
         desc="A list of boolean values to indicate inclusion in the final concatenated data"
     )
@@ -253,7 +253,7 @@ def massuni_linGLM(func_file: str,
     for i, beta_label in enumerate(design_matrix.columns):
         beta_filename = replace_entities(
             file=func_file,
-            entities=entities_base | {"suffix": f"beta-{beta_label}_boldmap"}
+            entities=entities_base | {"suffix": f"beta-{beta_label}_boldmap", "ext":".dscalar.nii"}
         )
         create_image_like(
             data=(beta_data[i])[np.newaxis, :],
@@ -302,7 +302,7 @@ def combine_regression_data(func_list: list,
     lengths = [len(x) for x in
                [func_data_list, tmask_list, event_matrices,
                    nuisance_matrices, inclusion_list]
-               if x is not None]
+               if x]
     if not len(set(lengths)) == 1:
         raise RuntimeError(
             f"All input lists must be the same length: {lengths}")
@@ -314,17 +314,17 @@ def combine_regression_data(func_list: list,
                                 if data_list else None for data_list in
                                 [func_data_list, tmask_list, event_matrices, nuisance_matrices]]
         func_data_list, tmask_list, event_matrices, nuisance_matrices = remaining_data_lists
+        needed_len = sum(inclusion_list)
 
     # need either event matrices or nuisance matrices
     input_lists = [l for l in [event_matrices,
-                               nuisance_matrices] if l is not None]
+                               nuisance_matrices] if l]
     if len(input_lists) < 1:
         raise RuntimeError(
             f"Regression data must include event data or nuisance data, but recieved neither")
-
+    
     # combine the data matrices if needed
-    design_data_list = [tuple(in_list[i] for in_list in input_lists)
-                        for i in range(needed_len)]
+    design_data_list = [tuple(in_list[i] for in_list in input_lists) for i in range(needed_len)]
     for i in range(needed_len):
         time_axis = [len(design_data_list[i][0]), func_data_list[i].shape[0]]
         if len(design_data_list[i]) == 2:

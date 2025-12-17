@@ -19,6 +19,31 @@ cifti_files = [
 
 # Grab BOLD files from the preprocessed outputs, and list the runs and file extension for each 'func_space' in the files. 
 def parse_session_bold_files(layout:bids.BIDSLayout, subject:str, session:str, tasks:list[str]):
+    '''
+    Finds all BOLD files in the given BIDSLayout, with the given filters, and 
+    returns a dictionary with organization {SPACE : {"runs" : {TASK : list[RUN#]}, "extension" : [FILE-EXTENSION] }} 
+
+    Parameters
+    ----------
+    layout: bids.BIDSLayout
+        The BIDS layout to query
+
+    subject: str
+        The BIDS subject ID to filter on
+    
+    session: str
+        The BIDS session ID to filter on
+
+    tasks: list[str]
+        A list of BIDS task IDs to filter on
+    
+
+    Returns
+    -------
+    dict[str : dict[str : list] | list]
+        A dictionary organizing BOLD run numbers by task and functional space
+    
+    '''
     files = layout.get(subject=subject, session=session, task=tasks, suffix="bold", datatype="func", extension=[".nii",".nii.gz",".dtseries.nii"])
     space_run_dict = dict()
     for f in files:
@@ -39,6 +64,25 @@ def parse_session_bold_files(layout:bids.BIDSLayout, subject:str, session:str, t
 
 def load_data(func_file: str|Path|bids.layout.BIDSFile,
               brain_mask: str|Path) -> np.ndarray:
+    '''
+    Loads NIFTI or CIFTI file data into an in-memory numpy array of
+    of shape [volume/time, voxel/vertex #]. Volumetric NIFTI files must also have
+    an accompanying brain mask to define where to grab the data from.
+
+    Parameters
+    ----------
+    func_file: str|Path|bids.layout.BIDSFile
+        The path to a BOLD NIFTI or CIFTI file
+
+    brain_mask: str|Path
+        The path to a volumetric brain mask
+
+    Returns
+    -------
+    numpy.ndarray
+        A numpy array representing the data in the input file
+    
+    '''
     if isinstance(func_file, bids.layout.BIDSFile):
         func_file = str(func_file.path)
     elif not isinstance(func_file, str):
@@ -54,12 +98,41 @@ def load_data(func_file: str|Path|bids.layout.BIDSFile,
         
 
 def is_cifti_file(file: str|Path) -> str|None:
+    '''
+    Returns the CIFTI extention if the input path describes
+    a CIFTI file, else None
+
+    Parameters
+    ----------
+    file: str|Path
+        The path to a BOLD NIFTI or CIFTI file
+
+    Returns
+    -------
+    str | None
+        The CIFTI extention or None
+    '''
     if isinstance(file, Path):
         file = str(file)
     suffix = [cf for cf in cifti_files if file.endswith(cf)]
     return suffix[0] if len(suffix) > 0 else None
 
+
 def is_nifti_file(file: str|Path) -> str|None:
+    '''
+    Returns the NIFI extention if the input path describes
+    a NIFTI file, else None
+
+    Parameters
+    ----------
+    file: str|Path
+        The path to a BOLD NIFTI or CIFTI file
+
+    Returns
+    -------
+    str | None
+        The NIFTI extention or None
+    '''
     if isinstance(file, Path):
         file = str(file)
     not_cifti = is_cifti_file(file) is None
@@ -72,6 +145,44 @@ def create_image_like(data: np.ndarray,
                  out_file: str|Path,
                  dscalar_axis:list[str] = None,
                  brain_mask: str = None):
+    
+    """
+    Create a NIFTI or CIFTI image file from data using a source header template.
+
+    Parameters
+    ----------
+    data : np.ndarray
+        A numpy array representing the image data to be saved.
+    source_header : str | Path | nibabel.cifti2.cifti2.Cifti2Header
+        The path to a CIFTI file or a Cifti2Header object to use as a template
+        for the output image structure.
+    out_file : str | Path
+        The output file path where the NIFTI or CIFTI image will be saved.
+    dscalar_axis : list[str], optional
+        A list of scalar axis names. If provided, creates a ScalarAxis with these names.
+        If not provided, creates a SeriesAxis based on the source header. Default is None.
+    brain_mask : str, optional
+        Path to a brain mask file. If provided, the data is unmasked using this mask
+        and saved directly without creating a CIFTI structure. Default is None.
+
+    Returns
+    -------
+    None
+        The function saves the image to disk and returns None.
+
+    Raises
+    ------
+    ValueError
+        If source_header is not one of the following types: str, pathlib.Path, or
+        nibabel.cifti2.cifti2.Cifti2Header.
+
+    Notes
+    -----
+    - If brain_mask is provided, the function bypasses CIFTI image creation and
+        uses nibabel's unmask function to create a volumetric NIFTI.
+    - The output CIFTI image uses either a ScalarAxis or SeriesAxis for the first
+        dimension, depending on whether dscalar_axis is provided.
+    """
 
     if brain_mask:
         data_img = nmask.unmask(data, brain_mask)
@@ -93,14 +204,71 @@ def create_image_like(data: np.ndarray,
     nib.save(data_img, out_file)
     return    
 
+
 def replace_entities(file:str, entities:dict):
-    
+    """
+    This function iterates through a dictionary of entities and replaces each
+    entity in the BIDS filename with its associated value by calling replace_entity
+    for each pair.
+
+    Parameters
+    ----------
+    file : str
+        The file path in which entities will be replaced.
+    entities : dict
+        A dictionary where keys are entity names and values are the replacements
+        for those entities.
+
+    Returns
+    -------
+    str
+        The file path with all entities replaced by their corresponding values.
+
+    Examples
+    --------
+    >>> file_path = "sub-01_task-rest_bold.nii.gz"
+    >>> entities = {"sub": "02", "task": "motor"}
+    >>> replace_entities(file_path, entities)
+    "sub-02_task-motor_bold.nii.gz"
+    """
+
     for entity, value in entities.items():
         file = replace_entity(file, entity, value)
     return file
 
 
-def replace_entity(file:str, entity:str, value:str):
+def replace_entity(file: str, entity: str, value: str) -> str:
+    """
+    Replace or modify a specific entity within a filename.
+
+    Parameters
+    ----------
+    file : str
+        The filename to be modified.
+    entity : str
+        The BIDS entity key to replace.
+    value : str
+        The new value for the entity. If None, 
+        the entity will be removed from the filename.
+
+    Returns
+    -------
+    str: 
+        The modified filename with the specified entity replaced.
+        If the entity is not found in the filename, returns the original filename unchanged.
+
+    Examples
+    --------
+    >>> replace_entity("prefix_suffix.txt", "suffix", "newsuffix")
+    "prefix_newsuffix.txt"
+    >>> replace_entity("file.txt", "ext", ".md")
+    "file.md"
+    >>> replace_entity("file.txt", "path", "/new/path")
+    "/new/path/file.txt"
+    >>> replace_entity("prefix_type-value_suffix.txt", "type", "newvalue")
+    "prefix_type-newvalue_suffix.txt"
+    """
+
     if entity == "suffix":
         prefix, suffix = file.rsplit("_", 1)
         ext = suffix.split(".",1)[-1]
@@ -134,27 +302,21 @@ def make_option(value,
     """
     Generate a string, representing an option that gets fed into a subprocess or script.
 
-    For example, if a key is 'option' and its value is True, the option string it will generate would be:
+    Parameters
+    ----------
+    value: any 
+        Value to pass in along with the 'key' param.
+    key: str
+        Name of option, without any hyphen at the beginning.
+    delimeter: str
+        character to separate the key and the value in the option string. Default is a space.
+    convert_underscore: bool
+        flag to indicate that underscores should be replaced with '-'
 
-        --option
-
-    If value is equal to some string 'value', then the string would be:
-
-        --option value
-
-    If value is a list of strings:
-
-        --option value1 value2 ... valuen
-    :param value: Value to pass in along with the 'key' param.
-    :type value: any
-    :param key: Name of option, without any hyphen at the beginning.
-    :type key: str
-    :param delimeter: character to separate the key and the value in the option string. Default is a space.
-    :type delimeter: str
-    :param convert_underscore: flag to indicate that underscores should be replaced with '-'
-    :type convert_underscore: bool
-    :return: String to pass as an option into a subprocess call.
-    :rtype: str
+    Returns
+    -------
+    str
+        String to pass as an option into a subprocess call
     """
     second_part = None
     if key and convert_underscore:
@@ -179,12 +341,16 @@ def export_args_to_file(args,
     namespace to a file specified at 'file_path'. The input 'file_path' can either be a txt
     file or a json file.
 
-    :param args: an argument namespace to pull input values from
-    :type args: argparse.Namespace
-    :param argument_group: The argument group representing the subset of inputs to save to a file
-    :type argument_group: argparse._ArgumentGroup
-    :param file_path: a path to a file where the arguments should be saved
-    :type file_path: pathlib.Path
+    Parameters
+    ----------
+    args: argparse.Namespace
+        an argument namespace to pull input values from
+    argument_group: argparse._ArgumentGroup
+        The argument group representing the subset of inputs to save to a file
+    file_path: pathlib.Path
+        a path to a file where the arguments should be saved
+    extra_args: dict
+        A dictionary representing addtional argumnets to save out not present in the args Namespace
     """
 
     all_opts = dict(args._get_kwargs())

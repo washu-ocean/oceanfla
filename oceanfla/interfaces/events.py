@@ -99,6 +99,7 @@ def make_design_matrix(event_file: str | Path,
     if (fir and hrf) and not (fir_vars or hrf_vars):
         raise RuntimeError(
             "Both FIR and HRF were specified, but you need to specify at least one list of variables (fir_vars or hrf_vars)")
+    
     # fir_vars and hrf_vars must not have overlapping columns
     if (fir_vars and hrf_vars) and not set(fir_vars).isdisjoint(hrf_vars):
         raise RuntimeError(
@@ -107,6 +108,7 @@ def make_design_matrix(event_file: str | Path,
         events_matrix.columns)]  # unique trial types
     residual_conditions = [
         c for c in conditions if c not in unmodeled] if unmodeled else conditions
+    
     # Create other list if only one is specified
     if (fir and hrf) and (bool(fir_vars) ^ bool(hrf_vars)):
         if fir_vars:
@@ -140,7 +142,7 @@ def make_design_matrix(event_file: str | Path,
             hrf_conditions = [c for c in residual_conditions if c in hrf_vars]
         residual_conditions = [
             c for c in residual_conditions if c not in hrf_conditions]
-        logger.info(events_matrix)
+        # logger.info(events_matrix)
         cfeats = _hrf_convolve_features(features=events_matrix,
                                         column_names=hrf_conditions,
                                         time_col='index',
@@ -271,7 +273,7 @@ def _hrf_convolve_features(features,
         time = features.index.to_numpy()
 
     convolved_features = pd.DataFrame(index=time)
-    hrf_sig = np.loadtxt(custom_hrf) if custom_hrf is not None else self._create_hrf(
+    hrf_sig = np.loadtxt(custom_hrf) if custom_hrf is not None else create_hrf(
         time, time_to_peak=time_to_peak, undershoot_dur=undershoot_dur)
 
     for a in column_names:
@@ -307,7 +309,7 @@ def create_hrf(time, time_to_peak=5, undershoot_dur=12):
 
 
 def get_number_of_volumes(bold_in, brain_mask=None):
-    from oceanproc.firstlevel.utilities import load_data
+    from oceanfla.utilities import load_data
     func_data = load_data(func_file=bold_in,
                           brain_mask=brain_mask)
     return func_data.shape[0]

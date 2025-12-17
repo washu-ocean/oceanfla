@@ -41,7 +41,7 @@ pytest:
 
 First ensure that you have a `dist/` directory containing the wheel and compressed package files, and that the version of the package you're wanting to upload is different than what's already up on pypi (this can be changed in `pyproject.toml`. 
 
-Also, make sure you have a valid API token for uploading to the oceanproc project on pypi. You can make a `.pypirc` in your home (`~`) directory, with the following contents:
+Also, make sure you have a valid API token for uploading to the oceanfla project on pypi. You can make a `.pypirc` in your home (`~`) directory, with the following contents:
 
 ```
 [pypi]

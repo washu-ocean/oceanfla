@@ -6,6 +6,7 @@ from nipype.interfaces.base import (
     TraitedSpec,
     traits,
 )
+from nipype import Function
 
 
 def make_tmask(confounds_file: Path | str,
@@ -51,6 +52,8 @@ def make_tmask(confounds_file: Path | str,
                 "path": None
         })
     
+    # tmask_df = pd.DataFrame(columns=[f"{str(fd_threshold)}mm-tmask"], data=fd_mask)
+    # tmask_df.to_csv(out_file, sep="\t", index=False)
     np.savetxt(out_file, fd_mask)
     return out_file
 
@@ -108,3 +111,24 @@ class MakeTmask(SimpleInterface):
     #     outputs = self._outputs().get()
     #     outputs['out_file'] = getattr(self, '_results')
     #     return outputs
+
+
+def make_tmask_tsv(tmask_file:str, fd_threshold:float):
+    import numpy as np
+    import pandas as pd
+    from oceanfla.utilities import replace_entities
+
+    tmask_data = np.loadtxt(tmask_file)
+    tmask_df = pd.DataFrame(columns=[f"{str(fd_threshold)}mm_tmask"], data=tmask_data)
+    out_file = replace_entities(
+        file=tmask_file, 
+        entities={"ext": ".tsv", "path": None}
+    )
+    tmask_df.to_csv(out_file, sep="\t")
+    return out_file
+
+MakeTmaskTsv = Function(
+    function=make_tmask_tsv,
+    input_names=["tmask_file", "fd_threshold"],
+    output_names=["tmask_tsv"]
+)

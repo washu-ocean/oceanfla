@@ -2,10 +2,13 @@
 from pathlib import Path
 import bids
 
-all_opts = None
-
+# all_opts = None
 
 class Options():
+    '''
+    A singleton class designed to be the holder of all user parsed arguments.
+    This class can only be initialized once, afterward, the same instance is returned.
+    '''
     _instance = None
     _initialized = False
     layouts = []
@@ -24,14 +27,33 @@ class Options():
                 setattr(self, k, v)
             global all_opts
             all_opts = self
+            self._initialized = True
 
+all_opts = Options()
 
 def set_configs(args):
-    Options(args)
+    all_opts.__init__(args)
+    # Options(args)
     # loggers.initialize()
 
 
 def get_layout_for_file(file) -> bids.BIDSLayout:
+    '''
+    Function to return the corresponding bids.BIDSLayout
+    for a given filepath 
+
+    Parameters
+    ----------
+    file: str
+        The path of the file belonging to some BIDSLayout / BIDS directory
+    
+
+    Returns
+    -------
+    bids.BIDSLayout
+        The BIDSLayout object if the file belongs to a parsed BIDS directory
+    
+    '''
     if isinstance(file, Path):
         file = str(file.resolve())
     if isinstance(file, str):
@@ -46,7 +68,24 @@ def get_layout_for_file(file) -> bids.BIDSLayout:
     raise RuntimeError(f"No layout correspond to the input file {file}")
 
 
-def get_bids_file(file):
+
+def get_bids_file(file:str):
+    '''
+    Function to return the corresponding bids.layout.BIDSFile 
+    for a given filepath 
+
+    Parameters
+    ----------
+    file: str
+        The path of the file to convert
+    
+
+    Returns
+    -------
+    bids.layout.BIDSFile
+        The BIDSFile object or None if it is not found
+    
+    '''
     file_layout = get_layout_for_file(file)
     return file_layout.get_file(file)
 

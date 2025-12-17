@@ -112,11 +112,6 @@ class PercentChange(SimpleInterface):
         return runtime
     
 
-class SmoothFWHM(SimpleInterface):
-    pass
-    ## TODO ##
-
-
 
 def filter_data(func_file: str,
                 tmask_file: str,
@@ -126,6 +121,19 @@ def filter_data(func_file: str,
                 padtype: str = "mean",
                 padlen: int = 50,
                 brain_mask: str = None):
+    '''
+    Runs a butterworth filter on the data in the input file, using the filter
+    parameters specified. The temporal mask file is used to first censor the input data
+    before interpolating the missing frames, then running the filter.
+
+    Parameters
+    ----------
+    #TODO
+
+    Returns
+    -------
+    #TODO
+    '''
     from nilearn.signal import butterworth, _handle_scrubbed_volumes
     from oceanfla.utilities import load_data, create_image_like, replace_entities
     import numpy as np
@@ -196,7 +204,6 @@ def filter_data(func_file: str,
                       source_header=func_file,
                       out_file=out_path,
                       brain_mask=brain_mask)
-
     return out_path
 
 

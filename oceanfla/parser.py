@@ -4,6 +4,7 @@ from oceanfla.oceanparse import OceanParser
 import logging
 from oceanfla.utilities import export_args_to_file
 import bids
+from oceanfla.workflows import print_timestamp
 
 VERSION = "1.1.4"
 logger = logging.getLogger("parser")
@@ -268,6 +269,15 @@ def _build_parser():
 
     config_arguments.add_argument("--stdscale_glm", choices=["runlevel", "seslevel", "both", "none"], default="seslevel",
                                   help="Option to standard scale concatenated timeseries before running final GLM (after masking & nuisance regression)")
+    
+    config_arguments.add_argument("--n_procs", type=PositiveInt, default=4,
+                                  help="The number of CPUs to use for execution")
+    
+    config_arguments.add_argument("--mem_gb", type=PositiveFloat, default=20,
+                                  help="The amount of memory to use in GB for execution")
+    
+    config_arguments.add_argument("--reindex_bids", action="store_true",
+                                  help="Flag to indicate that BIDS directories should be reindexed")
 
 
     return (parser, config_arguments)
@@ -322,18 +332,19 @@ def parse_args():
         parser.error(
             f"The preprocessed outputs directory does not exist at path: {args.preproc_dir}")
 
+    print_timestamp("Indexing bids directories")
     args.raw_layout = bids.BIDSLayout(root=args.raw_bids,
                                       database_path=args.raw_bids / ".bids_indexer",
-                                      reset_database=True,
+                                      reset_database=args.reindex_bids,
                                       validate=False,
-                                      absolute_paths=True)
+                                      index_metadata=True)
     args.preproc_layout = bids.BIDSLayout(root=args.preproc_bids,
                                           database_path=args.preproc_bids / ".bids_indexer",
-                                          reset_database=True,
+                                          reset_database=args.reindex_bids,
                                           validate=False,
-                                          absolute_paths=True,
+                                          index_metadata=True,
                                           is_derivative=True)
-
+    print_timestamp("Finished indexing bids directories")
   
     # Export the current arguments to a file
     if args.export_args:
@@ -346,14 +357,16 @@ def parse_args():
             exit(1)
             # exit_program_early(e)
 
-    args.custom_desc = f"-{args.custom_desc}" if args.custom_desc else ""
+    # args.custom_desc = f"-{args.custom_desc}" if args.custom_desc else ""
     args.file_name_base = f"sub-{args.subject}_ses-{args.session}_task-{args.task}"
-
+    
     if not hasattr(args, "output_dir") or args.output_dir is None:
         # args.output_dir = args.derivs_dir / f"{args.derivs_subfolder}/sub-{args.subject}/ses-{args.session}/func"
         args.output_dir = args.derivs_dir / args.derivs_subfolder
         # args.output_dir.mkdir(exist_ok = True)
-    
+    # args.log_dir = args.output_dir / f"sub-{args.subject}/ses-{args.session}/log"
+    # args.log_dir.mkdir(exist_ok = True, parents=True)
+
     '''
     TODO: create singleton options class so arguments are passed to each process
     '''

@@ -9,12 +9,13 @@ description = "First level analysis for WUSTL Ocean labs"
 readme = "README.md"
 requires-python = "<3.13,>=3.10"
 dependencies = [
+    "sphinx-rtd-theme<3.0.0,>=2.0.0",
     "numpy>=1.26.0",
     "pandas<3.0.0,>=2.2.2",
     "nilearn<1.0.0,>=0.10.4",
     "scipy>=1.13.0",
     "matplotlib<4.0.0,>=3.9.1",
-    "pybids>=0.16.3",
+    "pybids==0.16.4",
     "nipype>=1.10.0",
     "niworkflows>=1.14.3"
 ]
@@ -28,4 +29,18 @@ dev = [
 ]
 
 [project.scripts]
-oceanfla = "oceanfla.run.run_glm:main"
+oceanfla = "oceanfla.run:main"
+
+[tool.pdm.build]
+includes = []
+[build-system]
+requires = ["pdm-backend"]
+build-backend = "pdm.backend"
+
+[tool.pdm.dev-dependencies]
+dev = [
+    "pytest<9.0.0,>=8.2.2",
+    "sphinx<8.0.0,>=7.3.7",
+    "twine<6.0.0,>=5.1.0",
+    "ipython<9.0.0,>=8.29.0",
+]

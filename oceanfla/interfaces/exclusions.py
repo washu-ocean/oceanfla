@@ -98,11 +98,11 @@ class CheckRuntSNR(SimpleInterface):
         return runtime
 
 
-CheckValidations = Function(
-    function=all,
-    input_names=["validation_list"],
-    output_names="include"
-)
+# CheckValidations = Function(
+#     function=all,
+#     input_names=["validation_list"],
+#     output_names="include"
+# )
 
 
 def check_run_retention(tmask_file: Path | str,
