@@ -2,7 +2,8 @@ from nipype import Node, Workflow, Function
 from nipype.interfaces.io import BIDSDataGrabber
 from nipype.interfaces.utility import IdentityInterface, Select
 from niworkflows.utils.bids import collect_participants
-from niworkflows.interfaces.bids import DerivativesDataSink
+# from niworkflows.interfaces.bids import DerivativesDataSink
+from oceanfla.interfaces.utility import FLADataSink
 from oceanfla.interfaces import workbench_utils
 from oceanfla.interfaces.clean import FilterData, PercentChange
 from oceanfla.interfaces.events import EventsMatrix, GetVolumeCount
@@ -299,10 +300,11 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
     need_compress = file_extension.endswith(".gz")
     task_name = "-".join(run_map.keys())
     beta_weights_ds = Node(
-        DerivativesDataSink(
+        FLADataSink(
             base_directory=all_opts.derivs_dir,
             out_path_base=all_opts.derivs_subfolder,
             compress=need_compress,
+            extra_bids_patterns=all_opts.bids_patterns,
             dismiss_entities=["desc", "run", "den"],
             suffix="boldmap",
             stat="effect",
@@ -322,12 +324,13 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
     ])
 
     design_matrix_ds = Node(
-        DerivativesDataSink(
+        FLADataSink(
             base_directory=all_opts.derivs_dir,
             out_path_base=all_opts.derivs_subfolder,
+            extra_bids_patterns=all_opts.bids_patterns,
             dismiss_entities=["run"],
-            desc="finalDesign",
-            suffix="timeseries",
+            desc="final",
+            suffix="design",
             task=task_name,
         ),
         name=f"{func_space}_design_matrix_ds"
@@ -342,9 +345,10 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
     ])
 
     residual_bold_ds = Node(
-        DerivativesDataSink(
+        FLADataSink(
             base_directory=all_opts.derivs_dir,
             out_path_base=all_opts.derivs_subfolder,
+            extra_bids_patterns=all_opts.bids_patterns,
             compress=need_compress,
             dismiss_entities=["run", "den"],
             desc="glmResidual",
@@ -501,12 +505,12 @@ def build_run_workflow(run, task: str, file_extension:str):
 
     if all_opts.debug:
         # save out the working files
-        event_matrix_ds = Node(DerivativesDataSink(
+        event_matrix_ds = Node(FLADataSink(
                 base_directory=all_opts.derivs_dir,
                 out_path_base=all_opts.derivs_subfolder,
-                # allowed_entities=("desc"),
-                desc="modeledEvents",
-                suffix="timeseries"
+                extra_bids_patterns=all_opts.bids_patterns,
+                desc="modeled",
+                suffix="events"
             ),
             name="event_matrix_ds"
         )
@@ -519,10 +523,11 @@ def build_run_workflow(run, task: str, file_extension:str):
             ])
         ])
 
-        nuisance_matrix_ds = Node(DerivativesDataSink(
+        nuisance_matrix_ds = Node(FLADataSink(
             base_directory=all_opts.derivs_dir,
             out_path_base=all_opts.derivs_subfolder,
-            desc="nuisance"
+            extra_bids_patterns=all_opts.bids_patterns,
+            desc="nuisance",
             ),
             name="nuisance_matrix_ds"
         )
@@ -540,10 +545,11 @@ def build_run_workflow(run, task: str, file_extension:str):
             name="make_tmask_tsv_node"
         )
         make_tmask_tsv_node.inputs.fd_threshold = all_opts.fd_threshold
-        tmask_ds = Node(DerivativesDataSink(
+        tmask_ds = Node(FLADataSink(
             base_directory=all_opts.derivs_dir,
             out_path_base=all_opts.derivs_subfolder,
-            desc="temporalMask",
+            extra_bids_patterns=all_opts.bids_patterns,
+            suffix="tmask"
             ),
             name="tmask_ds"
         )
@@ -552,7 +558,7 @@ def build_run_workflow(run, task: str, file_extension:str):
                 ("tmask_file", "tmask_file")
             ]),
             (inputnode, tmask_ds, [
-                ("confounds_file", "source_file")
+                ("events_file", "source_file")
             ]),
             (make_tmask_tsv_node, tmask_ds, [
                 ("tmask_tsv", "in_file")
@@ -577,9 +583,10 @@ def build_run_workflow(run, task: str, file_extension:str):
         last_func_node = smoothing_wf.get_node("outputnode")
         
         if all_opts.debug:
-            smoothed_ds = Node(DerivativesDataSink(
+            smoothed_ds = Node(FLADataSink(
                     base_directory=all_opts.derivs_dir,
                     out_path_base=all_opts.derivs_subfolder,
+                    extra_bids_patterns=all_opts.bids_patterns,
                     compress=compress_files,
                     dismiss_entities=["den"],
                     desc="smooth",
@@ -618,12 +625,13 @@ def build_run_workflow(run, task: str, file_extension:str):
         ])
         last_func_node = percent_change_node
         if all_opts.debug:
-            percent_change_ds = Node(DerivativesDataSink(
+            percent_change_ds = Node(FLADataSink(
                     base_directory=all_opts.derivs_dir,
                     out_path_base=all_opts.derivs_subfolder,
+                    extra_bids_patterns=all_opts.bids_patterns,
                     compress=compress_files,
                     dismiss_entities=["den"],
-                    desc="psc",
+                    desc="percentChange",
                 ),
                 name="percent_change_bold_ds"
             )
@@ -667,9 +675,10 @@ def build_run_workflow(run, task: str, file_extension:str):
         last_func_node = regression_wf.get_node("outputnode")
 
         if all_opts.debug:
-            regressed_bold_ds = Node(DerivativesDataSink(
+            regressed_bold_ds = Node(FLADataSink(
                     base_directory=all_opts.derivs_dir,
                     out_path_base=all_opts.derivs_subfolder,
+                    extra_bids_patterns=all_opts.bids_patterns,
                     compress=compress_files,
                     dismiss_entities=["den"],
                     desc="nuisanceRegressed"
@@ -685,10 +694,12 @@ def build_run_workflow(run, task: str, file_extension:str):
                 ])
             ])
 
-            nuisance_betas_ds = Node(DerivativesDataSink(
+            nuisance_betas_ds = Node(FLADataSink(
                     base_directory=all_opts.derivs_dir,
                     out_path_base=all_opts.derivs_subfolder,
+                    extra_bids_patterns=all_opts.bids_patterns,
                     compress=compress_files,
+                    dismiss_entities=["den"],
                     desc="nuisanceRegression",
                     suffix="boldmap",
                     stat="effect",
@@ -706,12 +717,13 @@ def build_run_workflow(run, task: str, file_extension:str):
                 ])
             ])
 
-            design_file_ds = Node(DerivativesDataSink(
+            design_file_ds = Node(FLADataSink(
                     base_directory=all_opts.derivs_dir,
                     out_path_base=all_opts.derivs_subfolder,
+                    extra_bids_patterns=all_opts.bids_patterns,
                     compress=compress_files,
                     desc="nuisanceRegression",
-                    suffix="timeseries"
+                    suffix="design"
                 ),
                 name="design_file_ds"
             )
@@ -762,9 +774,10 @@ def build_run_workflow(run, task: str, file_extension:str):
         ])
 
         if all_opts.debug:
-            filter_ds = Node(DerivativesDataSink(
+            filter_ds = Node(FLADataSink(
                 base_directory=all_opts.derivs_dir,
                 out_path_base=all_opts.derivs_subfolder,
+                extra_bids_patterns=all_opts.bids_patterns,
                 compress=compress_files,
                 allowed_entites=("hp", "lp"),
                 dismiss_entities=["den"],
@@ -1002,13 +1015,13 @@ def build_smoothing_wf(run, task: str, file_extension:str):
                     'lh': {
                         'suffix': 'midthickness',
                         'space': ["fsLR", "dhcpAsym"],
-                        'extension': 'surf.gii',
+                        'extension': '.surf.gii',
                         'hemi': 'L'
                     },
                     'rh':{
                         'suffix': 'midthickness',
                         'space': ["fsLR", "dhcpAsym"],
-                        'extension': 'surf.gii',
+                        'extension': '.surf.gii',
                         'hemi': 'R'
                     }
                 },

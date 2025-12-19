@@ -337,13 +337,13 @@ def parse_args():
                                       database_path=args.raw_bids / ".bids_indexer",
                                       reset_database=args.reindex_bids,
                                       validate=False,
-                                      index_metadata=True)
+                                      indexer=bids.BIDSLayoutIndexer(index_metadata=True))
     args.preproc_layout = bids.BIDSLayout(root=args.preproc_bids,
                                           database_path=args.preproc_bids / ".bids_indexer",
                                           reset_database=args.reindex_bids,
                                           validate=False,
-                                          index_metadata=True,
-                                          is_derivative=True)
+                                          is_derivative=True,
+                                          indexer=bids.BIDSLayoutIndexer(index_metadata=True))
     print_timestamp("Finished indexing bids directories")
   
     # Export the current arguments to a file

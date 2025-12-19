@@ -8,6 +8,7 @@ from nipype.interfaces.base import (
     traits,
 )
 from bids.utils import listify
+from niworkflows.interfaces.bids import DerivativesDataSink
 
 
 
@@ -133,3 +134,9 @@ def extract_task_run_group(bold_list: list,
             f"Could not find all the needed files for run-{run_needed}")
 
     return run_dict["bold"], run_dict["confounds"], run_dict["events"]
+
+
+class FLADataSink(DerivativesDataSink):
+    def __init__(self, allowed_entities=None, out_path_base=None, extra_bids_patterns=None, **inputs):
+        super().__init__(allowed_entities=allowed_entities, out_path_base=out_path_base, **inputs)
+        self._file_patterns += tuple(extra_bids_patterns)

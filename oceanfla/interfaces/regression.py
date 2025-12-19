@@ -263,7 +263,7 @@ def massuni_linGLM(func_file: str,
             brain_mask=brain_mask
         )
         beta_files.append(beta_filename)
-        beta_labels.append(beta_label)
+        beta_labels.append(beta_label.replace("_", "-"))
 
     # residual bold data
     residual_filename = replace_entities(

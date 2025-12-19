@@ -1,6 +1,7 @@
 # from nipype import logging
 from pathlib import Path
 import bids
+import json
 
 # all_opts = None
 
@@ -13,6 +14,7 @@ class Options():
     _initialized = False
     layouts = []
     generic_nuisance_columns = ["mean", "trend", "spike"]
+    _pattern_file = Path(__file__).resolve().parent / "resources" / "bids_paths.json"
 
     def __new__(cls, *args, **kwargs):
         if cls._instance is None:
@@ -28,6 +30,20 @@ class Options():
             global all_opts
             all_opts = self
             self._initialized = True
+            self.bids_patterns = json.loads(self._pattern_file.read_text())["oceanfla_patterns"]
+            # self._set_patterns()
+    
+    # def _set_patterns(self):
+    #     default_patterns = []
+    #     seen_configs = set()
+    #     for l in self.layouts:
+    #         for c in l.config.values():
+    #             if (c.default_path_patterns is not None) and (c not in seen_configs):
+    #                 default_patterns.extend(c.default_path_patterns)
+    #                 seen_configs.add(c)
+        
+    #     extra_patterns = json.loads(self._pattern_file.read_text())["oceanfla_patterns"]
+    #     self.bids_patterns = default_patterns + extra_patterns
 
 all_opts = Options()
 
