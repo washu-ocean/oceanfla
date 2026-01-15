@@ -1,5 +1,5 @@
 from nipype.interfaces.utility.base import MergeInputSpec, _ravel
-from nipype.interfaces.io import IOBase
+from nipype.interfaces.io import IOBase, add_traits
 from nipype.interfaces.base import (
     BaseInterfaceInputSpec,
     SimpleInterface,
@@ -8,8 +8,7 @@ from nipype.interfaces.base import (
     traits,
 )
 from bids.utils import listify
-from niworkflows.interfaces.bids import DerivativesDataSink
-
+from niworkflows.interfaces.bids import DerivativesDataSink, ReadSidecarJSON
 
 
 class MergeUnique(IOBase):
@@ -140,3 +139,55 @@ class FLADataSink(DerivativesDataSink):
     def __init__(self, allowed_entities=None, out_path_base=None, extra_bids_patterns=None, **inputs):
         super().__init__(allowed_entities=allowed_entities, out_path_base=out_path_base, **inputs)
         self._file_patterns += tuple(extra_bids_patterns)
+
+
+class ReadMetadataFileInputSpec(BaseInterfaceInputSpec):
+    bids_file = traits.File(
+        exists=True,
+        desc="A BIDS image/data file"
+    )
+
+class ReadMetadataFileOutputSpec(DynamicTraitedSpec):
+    metadata_dict = traits.Dict(
+        key_trait=traits.Str
+    )
+
+class ReadMetadataFile(SimpleInterface):
+    input_spec = ReadMetadataFileInputSpec
+    output_spec = ReadMetadataFileOutputSpec
+
+    def __init__(self, fields=None, error_on_missing=False, **inputs):
+        from bids.utils import listify
+
+        super().__init__(**inputs)
+        self._fields = listify(fields or [])
+        self._error_on_missing = error_on_missing
+
+    def _outputs(self):
+        base = super()._outputs()
+        if self._fields:
+            base = add_traits(base, self._fields)
+        return base
+
+    def _run_interface(self, runtime):
+        from oceanfla.utilities import replace_entity
+        from pathlib import Path
+        import json
+
+        metadata_dict = {}
+        metadata_path = Path(replace_entity(self.inputs.bids_file, "ext", ".json"))
+
+        if metadata_path.exists():
+            with open(metadata_path, "r") as metaf:
+                metadata_dict = json.load(metaf)
+            
+            for fname in self._fields:
+                if self._error_on_missing and fname not in metadata_dict:
+                    raise KeyError(
+                        f'Metadata field "{fname}" not found for file {self.inputs.in_file}'
+                    )
+                self._results[fname] = metadata_dict.get(fname, traits.Undefined)
+
+        self._results["metadata_dict"] = metadata_dict
+        return runtime
+        

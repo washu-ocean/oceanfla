@@ -9,7 +9,7 @@ from pathlib import Path
 from nipype import logging, Function
 
 
-logger = logging.getLogger("nipype.interface")
+# logger = logging.getLogger("nipype.interface")
 
 
 class EventsMatrixInputSpec(BaseInterfaceInputSpec):
@@ -90,10 +90,13 @@ def make_design_matrix(event_file: str | Path,
     import pandas as pd
     import numpy as np
     from textwrap import dedent
+    from oceanfla.config import get_logger
+    logger = get_logger("nipype.interface")
 
     events_long = _make_events_long(event_file, volumes, tr)
     events_matrix = events_long.copy()
 
+    logger.info("IN THE EVENTS NODE -- HI MOM")
     # If both FIR and HRF are specified, we should have at least one list
     # of columns for one of the categories specified.
     if (fir and hrf) and not (fir_vars or hrf_vars):

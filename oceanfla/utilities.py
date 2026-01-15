@@ -1,12 +1,17 @@
 from pathlib import Path
+import shutil
 import nibabel as nib
 import nilearn.masking as nmask
 import numpy as np
 import bids
 from bids.layout.utils import PaddedInt
-from bids.layout import parse_file_entities
-from nipype.utils.filemanip import split_filename
+import os
 import json
+import logging
+import sys
+from oceanfla.config import finish_logging
+
+logger = logging.getLogger("nipype.utils")
 # from bids.layout.writing import build_path
 
 cifti_files = [
@@ -402,3 +407,43 @@ def export_args_to_file(args,
 #     if exit_func and callable(exit_func):
 #         exit_func()
 #     sys.exit(1)
+
+
+def rmtree_error_callback(func, path, exc_info):
+    shutil.rmtree(path)
+
+
+def clean_paths(path_list:list):
+    all_good = True
+    for p in path_list:
+        path = Path(p)
+        try:
+            if path.is_dir():
+                shutil.rmtree(path, onerror=rmtree_error_callback)
+            elif path.is_file():
+                os.remove(path)
+            logger.info(f"removed the path: {path}")
+        except:
+            if path.exists():
+                all_good = False
+                logger.error(f"ERROR removing the path: {path}")
+    return all_good
+
+    
+def logger_exception_hook(exctype, value, traceback):
+    sys.__excepthook__(exctype, value, traceback)
+    logger.critical(f'Uncaught exception: {exctype.__name__} - {value}')
+    while traceback:
+        filename = traceback.tb_frame.f_code.co_filename
+        name = traceback.tb_frame.f_code.co_name
+        line_no = traceback.tb_lineno
+        traceback = traceback.tb_next
+        if traceback:
+            logger.critical(f"-- File {filename} line {line_no}, in {name} ")
+
+    # Where the exception occured
+    logger.exception(f"File {filename} line {line_no}, in {name}", exc_info=(exctype, value, traceback))
+    finish_logging()
+
+
+sys.excepthook = logger_exception_hook

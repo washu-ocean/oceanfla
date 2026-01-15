@@ -6,8 +6,8 @@ from nipype.interfaces.base import (
     CommandLineInputSpec
 )
 from nipype.interfaces.workbench.base import WBCommand
-from nipype.interfaces.workbench.cifti import CiftiSmoothInputSpec, CiftiSmoothOutputSpec, CiftiSmooth
-from bids.utils import listify
+# from nipype.interfaces.workbench.cifti import CiftiSmoothOutputSpec
+# from bids.utils import listify
 
 
 class VolumeSmoothInputSpec(CommandLineInputSpec):
@@ -33,24 +33,19 @@ class VolumeSmoothInputSpec(CommandLineInputSpec):
         position=2,
         desc="The output NIFTI",
     )
-    fwhm = traits.Bool(
+    roi = File(
+        exists=True,
         position=3,
-        argstr="-fwhm",
-        desc="kernel size is FWHM, not sigma",
+        argstr="-roi %s",
+        desc="the NIFTI volume to use as an ROI for smoothing",
     )
     fix_zeros = traits.Bool(
         position=4,
         argstr="-fix-zeros",
         desc="treat values of zero as missing data",
     )
-    roi = File(
-        exists=True,
-        position=5,
-        argstr="-roi %s",
-        desc="the NIFTI volume to use as an ROI for smoothing",
-    )
     subvolume = traits.Int(
-        position=6,
+        position=5,
         argstr="-subvolume %d",
         desc="the subvolume number or name to smooth"
     )
@@ -128,7 +123,7 @@ class CiftiParcellate(WBCommand):
     input_spec = CiftiParcellateInputSpec
     output_spec = CiftiParcellateOutputSpec
 
-    _cmd = "wb_command -volume-smoothing"
+    _cmd = "wb_command -cifti-parcellate"
 
     def _overload_extension(self, value):
         value_stem, cifti_ext, nii = value.rsplit(".", 2)
@@ -136,14 +131,4 @@ class CiftiParcellate(WBCommand):
         return value_stem + new_ext
 
 
-class SurfaceSmoothInputSpec(CiftiSmoothInputSpec):
-    fwhm = traits.Bool(
-        position=15,
-        argstr="-fwhm",
-        desc="kernel size is FWHM, not sigma",
-    )
-
-class SurfaceSmooth(CiftiSmooth):
-    input_spec = SurfaceSmoothInputSpec
-    output_spec = CiftiSmoothOutputSpec
 

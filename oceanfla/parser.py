@@ -1,10 +1,13 @@
 import argparse
 from pathlib import Path
+
+from sqlalchemy import exists
 from oceanfla.oceanparse import OceanParser
 import logging
 from oceanfla.utilities import export_args_to_file
 import bids
 from oceanfla.workflows import print_timestamp
+from datetime import datetime
 
 VERSION = "1.1.4"
 logger = logging.getLogger("parser")
@@ -116,7 +119,7 @@ def _build_parser():
     session_arguments.add_argument("--subject", "-su", required=True,
                                    help="The subject ID")
 
-    session_arguments.add_argument("--session", "-se", required=True,
+    session_arguments.add_argument("--session", "-se", required=False,
                                    help="The session ID")
 
     session_arguments.add_argument("--events_long", "-el", type=ExistingDir, nargs="?", const=lambda a: a.derivs_dir / a.preproc_subfolder,
@@ -218,6 +221,12 @@ def _build_parser():
     
     config_arguments.add_argument("--percent_change", "-pc", action="store_true",
                                   help="""Flag to convert data to percent signal change.""")
+    
+    config_arguments.add_argument("--exclude_run_mean", action="store_true",
+                                  help="Flag to indicate that you do not want to include a run-level means into the model.")
+    
+    config_arguments.add_argument("--exclude_run_trend", action="store_true",
+                                  help="Flag to indicate that you do not want to include a run-level trends into the model.")
 
     config_arguments.add_argument("--no_global_mean", action="store_true",
                                   help="Flag to indicate that you do not want to include a global mean into the model.")
@@ -276,8 +285,8 @@ def _build_parser():
     config_arguments.add_argument("--mem_gb", type=PositiveFloat, default=20,
                                   help="The amount of memory to use in GB for execution")
     
-    config_arguments.add_argument("--reindex_bids", action="store_true",
-                                  help="Flag to indicate that BIDS directories should be reindexed")
+    # config_arguments.add_argument("--reindex_bids", action="store_true",
+    #                               help="Flag to indicate that BIDS directories should be reindexed")
 
 
     return (parser, config_arguments)
@@ -326,25 +335,43 @@ def parse_args():
     if callable(args.events_long):
         args.events_long = args.events_long(args)
 
+    tstamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    execution_label = f"oceanfla_task-{'-'.join(args.task)}_{tstamp}"
+
+    if not hasattr(args, "output_dir") or args.output_dir is None:
+        args.output_dir = args.derivs_dir / args.derivs_subfolder
+        # args.output_dir.mkdir(exist_ok = True)
+
+    args.log_dir = args.output_dir / "logs"
+    args.log_dir.mkdir(exist_ok = True, parents=True)
+    args.log_file = args.log_dir / f"{execution_label}.log"
+
+    args.log_level = logging.DEBUG if args.debug else logging.INFO
+
+    args.work_dir = args.work_dir / execution_label
+    args.work_dir.mkdir(parents=False, exist_ok=False)
+
     # Add bids layouts for both bids directories
     args.preproc_bids = args.derivs_dir / args.preproc_subfolder
     if not args.preproc_bids.exists():
         parser.error(
-            f"The preprocessed outputs directory does not exist at path: {args.preproc_dir}")
-
+            f"The preprocessed outputs directory does not exist at path: {args.preproc_bids}")
+    
     print_timestamp("Indexing bids directories")
+    raw_bids_db_path = args.work_dir / f".raw_indexer"
     args.raw_layout = bids.BIDSLayout(root=args.raw_bids,
-                                      database_path=args.raw_bids / ".bids_indexer",
-                                      reset_database=args.reindex_bids,
+                                      database_path=raw_bids_db_path,
+                                    #   reset_database=True,
                                       validate=False,
-                                      indexer=bids.BIDSLayoutIndexer(index_metadata=True))
+                                      indexer=bids.BIDSLayoutIndexer(index_metadata=False))
+    preproc_bids_db_path = args.work_dir / f".preproc_indexer"
     args.preproc_layout = bids.BIDSLayout(root=args.preproc_bids,
-                                          database_path=args.preproc_bids / ".bids_indexer",
-                                          reset_database=args.reindex_bids,
+                                          database_path=preproc_bids_db_path,
+                                        #   reset_database=True,
                                           validate=False,
                                           is_derivative=True,
-                                          indexer=bids.BIDSLayoutIndexer(index_metadata=True))
-    print_timestamp("Finished indexing bids directories")
+                                          indexer=bids.BIDSLayoutIndexer(index_metadata=False))
+    # print_timestamp("Finished indexing bids directories")
   
     # Export the current arguments to a file
     if args.export_args:
@@ -358,14 +385,7 @@ def parse_args():
             # exit_program_early(e)
 
     # args.custom_desc = f"-{args.custom_desc}" if args.custom_desc else ""
-    args.file_name_base = f"sub-{args.subject}_ses-{args.session}_task-{args.task}"
-    
-    if not hasattr(args, "output_dir") or args.output_dir is None:
-        # args.output_dir = args.derivs_dir / f"{args.derivs_subfolder}/sub-{args.subject}/ses-{args.session}/func"
-        args.output_dir = args.derivs_dir / args.derivs_subfolder
-        # args.output_dir.mkdir(exist_ok = True)
-    # args.log_dir = args.output_dir / f"sub-{args.subject}/ses-{args.session}/log"
-    # args.log_dir.mkdir(exist_ok = True, parents=True)
+    # args.file_name_base = f"sub-{args.subject}_ses-{args.session}_task-{args.task}"
 
     '''
     TODO: create singleton options class so arguments are passed to each process

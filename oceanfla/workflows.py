@@ -1,10 +1,10 @@
 from nipype import Node, Workflow, Function
 from nipype.interfaces.io import BIDSDataGrabber
 from nipype.interfaces.utility import IdentityInterface, Select
+from nipype.interfaces.workbench.cifti import CiftiSmooth
 from niworkflows.utils.bids import collect_participants
-# from niworkflows.interfaces.bids import DerivativesDataSink
-from oceanfla.interfaces.utility import FLADataSink
-from oceanfla.interfaces import workbench_utils
+# from niworkflows.interfaces.bids import ReadSidecarJSON
+from oceanfla.interfaces.utility import FLADataSink, ReadMetadataFile
 from oceanfla.interfaces.clean import FilterData, PercentChange
 from oceanfla.interfaces.events import EventsMatrix, GetVolumeCount
 from oceanfla.interfaces.exclusions import CheckRunRetention, CheckRuntSNR
@@ -13,13 +13,15 @@ from oceanfla.interfaces.regression import ConcatRegressionData, RunGLMRegressio
 from oceanfla.interfaces.tmask import MakeTmask, MakeTmaskTsv
 from oceanfla.interfaces.utility import MergeUnique, ExtractDataGroup
 from oceanfla.config import all_opts
-from oceanfla.interfaces.workbench_utils import SurfaceSmooth, VolumeSmooth
+from oceanfla.interfaces.workbench_utils import CiftiParcellate, VolumeSmooth
 from oceanfla.utilities import is_cifti_file, is_nifti_file, parse_session_bold_files
 from bids.utils import listify
 from pathlib import Path
 from datetime import datetime
-# from bids.layout import parse_file_entities
+import logging
 
+
+logger = logging.getLogger("nipype.workflow")
 
 '''
 Workflow illustration:
@@ -60,13 +62,15 @@ def build_oceanfla_wf(subjects: list[str] | str | None, base_dir=Path | str):
     # all_subjects = set(all_opts.preproc_layout.get_subjects())
     # print_timestamp("finished collecting all subjects")
 
-    print_timestamp("Collecting participants")
-    subject_list = collect_participants(
-        bids_dir=all_opts.preproc_layout,
-        participant_label=listify(subjects)
-    )
-    print(subject_list)
-    print_timestamp("finished collecting participants")
+    # print_timestamp("Collecting participants")
+    subject_list = listify(subjects)
+    if not subject_list:
+        subject_list = collect_participants(
+            bids_dir=all_opts.preproc_layout,
+            participant_label=subject_list
+        )
+    # print(subject_list)
+    # print_timestamp("finished collecting participants")
 
     start_node = Node(
         IdentityInterface(
@@ -77,18 +81,23 @@ def build_oceanfla_wf(subjects: list[str] | str | None, base_dir=Path | str):
     start_node.inputs.task = tasks
 
     for sub in subject_list:
-        sessions = all_opts.preproc_layout.get_sessions(subject=sub)
-        if len(sessions) == 0:
-            sessions = [None]
+        sessions = [None]
+        if all_opts.session:
+            sessions = [all_opts.session]
+        else:
+            bids_sessions = all_opts.preproc_layout.get_sessions(subject=sub)
+            if len(bids_sessions) > 0:
+                sessions = bids_sessions
+
         for ses in sessions:
             ses_wf = build_session_wf(subject=sub,
                                       session=ses)
-            ses_log_dir = all_opts.output_dir / f"sub-{sub}/{f'ses-{ses}/' if ses else ''}log"
-            ses_log_dir.mkdir(exist_ok=True, parents=True)
-            ses_wf.config['logging'] = {
-                'log_directory': str(ses_log_dir),
-                'log_to_file': True
-            }
+            # ses_log_dir = all_opts.output_dir / f"sub-{sub}/{f'ses-{ses}/' if ses else ''}log"
+            # ses_log_dir.mkdir(exist_ok=True, parents=True)
+            # ses_wf.config['logging'] = {
+            #     'log_directory': str(ses_log_dir.resolve()),
+            #     'log_to_file': True
+            # }
             fla_wf.connect([
                 (start_node, ses_wf, [
                     ("task", "inputnode.task")
@@ -101,6 +110,7 @@ def build_oceanfla_wf(subjects: list[str] | str | None, base_dir=Path | str):
 def build_session_wf(subject, session=None):
 
     wf_name = f"sub_{subject}_{f'ses_{session}_' if session else ''}wf"
+    logger.info(f"creating the session-level workflow: {wf_name}")
     workflow = Workflow(name=wf_name)
 
     input_node = Node(
@@ -156,7 +166,9 @@ def build_session_wf(subject, session=None):
 def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
 
     # Define the workflow and the input node for this functional space
-    workflow = Workflow(name=f"space_{func_space}_wf")
+    wf_name = f"space_{func_space}_wf"
+    logger.info(f"creating the functional-space-level workflow: {wf_name}")
+    workflow = Workflow(name=wf_name)
 
     input_node = Node(
         IdentityInterface(
@@ -197,7 +209,7 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
                     'extension': '.tsv',
                 }
             },
-            load_layout=all_opts.preproc_layout._root / ".bids_indexer"
+            load_layout=Path(all_opts.preproc_layout.connection_manager.database_file).parent
         ),
         name="derivs_bidssrc_node"
     )
@@ -213,9 +225,46 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
                     'extension': '.tsv'
                 },
             },
-            load_layout=all_opts.raw_layout._root / ".bids_indexer"
+            load_layout=Path(all_opts.raw_layout.connection_manager.database_file).parent
         ),
         name="raw_bidssrc_node"
+    )
+
+    surf_grabber = Node(
+        BIDSDataGrabber(
+            base_dir=all_opts.preproc_bids,
+            datatype='anat',
+            raise_on_empty = True,
+            output_query={
+                'lh': {
+                    'suffix': 'midthickness',
+                    'space': ["fsLR", "dhcpAsym"],
+                    'extension': '.surf.gii',
+                    'hemi': 'L'
+                },
+                'rh':{
+                    'suffix': 'midthickness',
+                    'space': ["fsLR", "dhcpAsym"],
+                    'extension': '.surf.gii',
+                    'hemi': 'R'
+                }
+            },
+            load_layout=Path(all_opts.preproc_layout.connection_manager.database_file).parent
+        ),
+        name="surf_grabber_node"
+    )
+
+    lh_list_select_node = Node(
+        Select(
+            index=0
+        ),
+        name="lh_select_first_node"
+    )
+    rh_list_select_node = Node(
+        Select(
+            index=0
+        ),
+        name="rh_select_first_node"
     )
 
     # Connect the inputs to the data-grabber nodes
@@ -231,6 +280,21 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
             ("task", "task")
         ])
     ])
+
+    # if smoothing is requested
+    if is_cifti_file(file_extension) and all_opts.fwhm:
+        workflow.connect([
+            (input_node, surf_grabber, [
+                ("subject", "subject"),
+                ("session", "session")
+            ]),
+            (surf_grabber, lh_list_select_node, [
+                ("lh", "inlist")
+            ]),
+            (surf_grabber, rh_list_select_node, [
+                ("rh", "inlist")
+            ]),
+        ])
 
     input_merging_node = Node(
         MergeUnique(),
@@ -273,6 +337,16 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
                     ("events_file", "inputnode.events_file"),
                 ])
             ])
+
+            if is_cifti_file(file_extension) and all_opts.fwhm:
+                workflow.connect([
+                    (lh_list_select_node, run_level_wf, [
+                        ("out", "inputnode.lh_surf")
+                    ]),
+                    (rh_list_select_node, run_level_wf, [
+                        ("out", "inputnode.rh_surf")
+                    ])
+                ])
 
             # Connect the output of the run-level workflow to the merging node
             for out_key in run_level_wf.get_node("outputnode").outputs.get().keys():
@@ -372,8 +446,10 @@ def build_run_workflow(run, task: str, file_extension:str):
     from oceanfla.interfaces.nuisance import make_regressor_run_specific
 
     ### Define the workflow and the inputnode ###
-    workflow = Workflow(name=f"task_{task}_run_{run}_processsing_wf")
-    print_timestamp(f"building run workflow {workflow.name}")
+    wf_name = f"task_{task}_run_{run}_processsing_wf"
+    logger.info(f"creating the run-level workflow: {wf_name}")
+    workflow = Workflow(name=wf_name)
+    # print_timestamp(f"building run workflow {workflow.name}")
     inputnode = Node(
         IdentityInterface(
             fields=[
@@ -382,6 +458,8 @@ def build_run_workflow(run, task: str, file_extension:str):
                 "bold_file",
                 "confounds_file",
                 "events_file",
+                "lh_surf",
+                "rh_surf"
             ]
         ),
         name="inputnode"
@@ -433,23 +511,13 @@ def build_run_workflow(run, task: str, file_extension:str):
 
 
     ### Create run-level event matrix ###
-    def tr_extract_func(file, known_tr=None):
-        if known_tr:
-            return known_tr
-        else:
-            from oceanfla.config import get_bids_file, get_layout_for_file
-            return get_layout_for_file(file).get_tr(get_bids_file(file))
-            # return get_bids_file(file).entities["RepetitionTime"]
-
-    extract_tr_node = Node(
-        Function(
-            input_names=["file", "known_tr"],
-            output_names=["tr"],
-            function=tr_extract_func
+    get_metadata_node = Node(
+        ReadMetadataFile(
+            fields=["RepetitionTime"],
+            error_on_missing=True,
         ),
-        name="tr_extract_node"
+        name="get_metadata_node"
     )
-    extract_tr_node.inputs.known_tr = all_opts.repetition_time
 
     get_volumes_node = Node(
         GetVolumeCount,
@@ -472,8 +540,8 @@ def build_run_workflow(run, task: str, file_extension:str):
     nuisance_mat_node = Node(
         GenerateNuisanceMatrix(
             confounds_columns=all_opts.confounds,
-            demean=True,  # not all_opts.exclude_run_mean
-            linear_trend=True,  # not all_opts.exclude_run_trend
+            demean=(not all_opts.exclude_run_mean),
+            linear_trend=(not all_opts.exclude_run_trend),
             spike_threshold=all_opts.fd_threshold if all_opts.spike_regression else None,
             volterra_lag=all_opts.volterra_lag,
             volterra_columns=all_opts.volterra_columns,
@@ -481,15 +549,21 @@ def build_run_workflow(run, task: str, file_extension:str):
         name="nuisance_matrix_node"
     )
 
+    if all_opts.repetition_time:
+        events_matrix_node.inputs.tr = all_opts.repetition_time
+    else:
+        workflow.connect([
+            (inputnode, get_metadata_node, [
+                ("bold_file", "bids_file")
+            ]),
+            (get_metadata_node, events_matrix_node, [
+                ("RepetitionTime", "tr")
+            ])
+        ])
+
     workflow.connect([
-        (inputnode, extract_tr_node, [
-            ("bold_file", "file")
-        ]),
         (inputnode, get_volumes_node, [
             ("bold_file", "bold_in")
-        ]),
-        (extract_tr_node, events_matrix_node, [
-            ("tr", "tr")
         ]),
         (get_volumes_node, events_matrix_node, [
             ("volumes", "volumes")
@@ -574,7 +648,9 @@ def build_run_workflow(run, task: str, file_extension:str):
         workflow.connect([
             (inputnode, smoothing_wf, [
                 ("subject", "inputnode.subject"),
-                ("session", "inputnode.session")
+                ("session", "inputnode.session"),
+                ("lh_surf", "inputnode.lh_surf"),
+                ("rh_surf", "inputnode.rh_surf"),
             ]),
             (last_func_node, smoothing_wf, [
                 ("bold_file", "inputnode.bold_file")
@@ -767,11 +843,17 @@ def build_run_workflow(run, task: str, file_extension:str):
             ]),
             (tmask_node, filter_node, [
                 ("tmask_file", "tmask_in")
-            ]),
-            (extract_tr_node, filter_node, [
-                ("tr", "tr")
-            ]),
+            ])
         ])
+        
+        if all_opts.repetition_time:
+            filter_node.inputs.tr = all_opts.repetition_time
+        else:
+            workflow.connect([
+                (get_metadata_node, filter_node, [
+                    ("RepetitionTime", "tr")
+                ])
+            ])
 
         if all_opts.debug:
             filter_ds = Node(FLADataSink(
@@ -982,6 +1064,7 @@ def build_exclusion_wf(run, task):
 
 
 def build_smoothing_wf(run, task: str, file_extension:str):
+    from nibabel.processing import fwhm2sigma
 
     ### Define the workflow and the inputnode ###
     geom_label = "surface" if is_cifti_file(file_extension) else "volume"
@@ -992,6 +1075,8 @@ def build_smoothing_wf(run, task: str, file_extension:str):
                 "subject",
                 "session",
                 "bold_file",
+                "lh_surf",
+                "rh_surf"
             ]
         ),
         name="inputnode"
@@ -1006,72 +1091,72 @@ def build_smoothing_wf(run, task: str, file_extension:str):
     )
 
     if is_cifti_file(file_extension):
-        surf_grabber = Node(
-            BIDSDataGrabber(
-                base_dir=all_opts.preproc_bids,
-                datatype='anat',
-                raise_on_empty = True,
-                output_query={
-                    'lh': {
-                        'suffix': 'midthickness',
-                        'space': ["fsLR", "dhcpAsym"],
-                        'extension': '.surf.gii',
-                        'hemi': 'L'
-                    },
-                    'rh':{
-                        'suffix': 'midthickness',
-                        'space': ["fsLR", "dhcpAsym"],
-                        'extension': '.surf.gii',
-                        'hemi': 'R'
-                    }
-                },
-                load_layout=all_opts.preproc_layout._root / ".bids_indexer"
-            ),
-            name="surf_grabber_node"
-        )
+        # surf_grabber = Node(
+        #     BIDSDataGrabber(
+        #         base_dir=all_opts.preproc_bids,
+        #         datatype='anat',
+        #         raise_on_empty = True,
+        #         output_query={
+        #             'lh': {
+        #                 'suffix': 'midthickness',
+        #                 'space': ["fsLR", "dhcpAsym"],
+        #                 'extension': '.surf.gii',
+        #                 'hemi': 'L'
+        #             },
+        #             'rh':{
+        #                 'suffix': 'midthickness',
+        #                 'space': ["fsLR", "dhcpAsym"],
+        #                 'extension': '.surf.gii',
+        #                 'hemi': 'R'
+        #             }
+        #         },
+        #         load_layout=Path(all_opts.preproc_layout.connection_manager.database_file).parent
+        #     ),
+        #     name="surf_grabber_node"
+        # )
 
-        lh_list_select_node = Node(
-            Select(
-                index=0
-            ),
-            name="lh_select_first_node"
-        )
-        rh_list_select_node = Node(
-            Select(
-                index=0
-            ),
-            name="rh_select_first_node"
-        )
+        # lh_list_select_node = Node(
+        #     Select(
+        #         index=0
+        #     ),
+        #     name="lh_select_first_node"
+        # )
+        # rh_list_select_node = Node(
+        #     Select(
+        #         index=0
+        #     ),
+        #     name="rh_select_first_node"
+        # )
 
         surface_smooth_node = Node(
-            SurfaceSmooth(
-                sigma_surf=all_opts.fwhm,
-                sigma_vol=all_opts.fwhm,
+            CiftiSmooth(
+                sigma_surf=fwhm2sigma(all_opts.fwhm),
+                sigma_vol=fwhm2sigma(all_opts.fwhm),
                 direction = "COLUMN",
-                fwhm = True,
             ),
             name="surface_smooth_node"
         )
+        surface_smooth_node.inputs.environ.update({"OMP_NUM_THREADS": str(all_opts.n_procs)})
 
         workflow.connect([
-            (inputnode, surf_grabber, [
-                ("subject", "subject"),
-                ("session", "session")
-            ]),
-            (surf_grabber, lh_list_select_node, [
-                ("lh", "inlist")
-            ]),
-            (surf_grabber, rh_list_select_node, [
-                ("rh", "inlist")
-            ]),
+            # (inputnode, surf_grabber, [
+            #     ("subject", "subject"),
+            #     ("session", "session")
+            # ]),
+            # (surf_grabber, lh_list_select_node, [
+            #     ("lh", "inlist")
+            # ]),
+            # (surf_grabber, rh_list_select_node, [
+            #     ("rh", "inlist")
+            # ]),
             (inputnode, surface_smooth_node, [
                 ("bold_file", "in_file")
             ]),
-            (lh_list_select_node, surface_smooth_node, [
-                ("out", "left_surf")
+            (inputnode, surface_smooth_node, [
+                ("lh_surf", "left_surf")
             ]),
-            (rh_list_select_node, surface_smooth_node, [
-                ("out", "right_surf")
+            (inputnode, surface_smooth_node, [
+                ("rh_surf", "right_surf")
             ]),
             (surface_smooth_node, outputnode, [
                 ("out_file", "bold_file")
@@ -1081,12 +1166,12 @@ def build_smoothing_wf(run, task: str, file_extension:str):
     elif is_nifti_file(file_extension):
         volume_smooth_node = Node(
             VolumeSmooth(
-                kernel=all_opts.fwhm,
+                kernel=fwhm2sigma(all_opts.fwhm),
                 fwhm=True,
             ),
             name="volume_smooth_node"
         )
-
+        volume_smooth_node.inputs.environ.update({"OMP_NUM_THREADS":str(all_opts.n_procs)})
         workflow.connect([
             (inputnode, volume_smooth_node, [
                 ("bold_file", "volume_in")
