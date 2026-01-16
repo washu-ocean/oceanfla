@@ -3,6 +3,8 @@ import bids
 import json
 import multiprocessing
 import logging
+from logging.handlers import QueueHandler
+
 
 
 class Options():
@@ -39,37 +41,20 @@ class Options():
             setattr(self, 'log_process', log_process)
             for log_name in self.nipype_loggers:
                 logger = get_logger(log_name, log_queue)
+                logger.setLevel(self.log_level)
             
             # log the arguments used for this run
             logger = get_logger("nipype.utils")
-            # options_msg = "\n\t".join([f" {k} : {v}" for k,v in opts.items() if not isins])
             logger.info("\n\t".join(option_msg_list))
 
-            global all_opts
-            all_opts = self
             self._initialized = True
             self.bids_patterns = json.loads(self._pattern_file.read_text())["oceanfla_patterns"]
-
-            # self._set_patterns()
     
-    # def _set_patterns(self):
-    #     default_patterns = []
-    #     seen_configs = set()
-    #     for l in self.layouts:
-    #         for c in l.config.values():
-    #             if (c.default_path_patterns is not None) and (c not in seen_configs):
-    #                 default_patterns.extend(c.default_path_patterns)
-    #                 seen_configs.add(c)
-        
-    #     extra_patterns = json.loads(self._pattern_file.read_text())["oceanfla_patterns"]
-    #     self.bids_patterns = default_patterns + extra_patterns
 
 all_opts = Options()
 
 def set_configs(args):
     all_opts.__init__(args)
-    # Options(args)
-    # loggers.initialize()
 
 
 def get_layout_for_file(file) -> bids.BIDSLayout:
@@ -154,10 +139,11 @@ def file_log_process(q, log_file, log_level=logging.INFO, log_fmt=None):
             logger = logging.getLogger(record.name)
             logger.handle(record)
         except Exception:
-            msg = "Error in the logger process"
+            msg = "Error in the file logging process"
             root.error(msg)
             print(msg)
             break
+    root.info("closing log file")
     file_handler.close()
     
 
@@ -167,14 +153,23 @@ def config_logging_process(log_file, log_level=logging.INFO, log_fmt=None):
     log_process = multiprocessing.Process(target=file_log_process, args=(log_q, log_file, log_level, log_fmt))
     log_process.start()
 
+    logger = get_logger("nipype.utils", log_q)
+    logger.info("File logging started")
+
     return log_process, log_q
 
 
 def finish_logging():
-    logger = get_logger('nipype.utils')
-    logger.info("Ending file logging")
-    all_opts.log_queue.put_nowait(None)
-    all_opts.log_process.join()
+    try: 
+        logger = get_logger('nipype.utils')
+        logger.info("Ending log")
+    except:
+        print("Ending log")
+    finally:
+        if all_opts.log_process:
+            all_opts.log_queue.put_nowait(None)
+            all_opts.log_process.join()
+    logging.shutdown()
     return
 
 
@@ -183,13 +178,19 @@ def get_logger(name, q=None):
         q = all_opts.log_queue
     
     logger = logging.getLogger(name)
-    has_queue_hdlr = any([isinstance(hdlr, logging.handlers.QueueHandler) 
+    has_queue_hdlr = any([isinstance(hdlr, QueueHandler) 
                           for hdlr in logger.handlers])
     if not has_queue_hdlr:
-        queue_handler = logging.handlers.QueueHandler(q)
+        queue_handler = QueueHandler(q)
         logger.addHandler(queue_handler)
 
     return logger
+
+
+def close_layouts():
+    for lay in all_opts.layouts:
+        lay.connection_manager.session.close()
+    del all_opts.layouts[:]
 
 
 # class loggers():

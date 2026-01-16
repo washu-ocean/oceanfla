@@ -9,6 +9,8 @@ import os
 import json
 import logging
 import sys
+import time
+import stat
 from oceanfla.config import finish_logging
 
 logger = logging.getLogger("nipype.utils")
@@ -146,8 +148,8 @@ def is_nifti_file(file: str|Path) -> str|None:
 
 
 def create_image_like(data: np.ndarray,
-                 source_header,
                  out_file: str|Path,
+                 source_header = None,
                  dscalar_axis:list[str] = None,
                  brain_mask: str = None):
     
@@ -167,8 +169,8 @@ def create_image_like(data: np.ndarray,
         A list of scalar axis names. If provided, creates a ScalarAxis with these names.
         If not provided, creates a SeriesAxis based on the source header. Default is None.
     brain_mask : str, optional
-        Path to a brain mask file. If provided, the data is unmasked using this mask
-        and saved directly without creating a CIFTI structure. Default is None.
+        Path to a volumetric brain mask file. If provided, the data is unmasked using this mask
+        and saved directly into a NIFTI file. Default is None.
 
     Returns
     -------
@@ -189,25 +191,32 @@ def create_image_like(data: np.ndarray,
         dimension, depending on whether dscalar_axis is provided.
     """
 
-    if brain_mask:
+    data_img = None
+    if source_header:
+        wrong_type = True
+        if isinstance(source_header, str) or isinstance(source_header, Path):
+            source_header = nib.load(source_header).header
+            wrong_type = False
+        if isinstance(source_header, nib.cifti2.cifti2.Cifti2Header):
+            wrong_type = False
+            ax0 = ( 
+                nib.cifti2.cifti2_axes.ScalarAxis(name=dscalar_axis) 
+                    ) if  dscalar_axis else (
+                nib.cifti2.cifti2_axes.SeriesAxis(start=0, step=source_header.get_axis(0).step, size=data.shape[0]) 
+                )
+            
+            data_img = nib.cifti2.cifti2.Cifti2Image(data, (ax0, source_header.get_axis(1)))
+        if wrong_type:
+            raise ValueError("source_header must be one of the following types: [str, pathlib.Path, nibabel.cifti2.cifti2.Cifti2Header]")
+        
+    if brain_mask and data_img is None:
         data_img = nmask.unmask(data, brain_mask)
-        nib.save(data_img, out_file)
-        return
-
-    if isinstance(source_header, str) or isinstance(source_header, Path):
-        source_header = nib.load(source_header).header
-    elif not isinstance(source_header, nib.cifti2.cifti2.Cifti2Header):
-        raise ValueError("source_header must be one of the following types: [str, pathlib.Path, nibabel.cifti2.cifti2.Cifti2Header]")
     
-    ax0 = ( 
-        nib.cifti2.cifti2_axes.ScalarAxis(name=dscalar_axis) 
-            ) if  dscalar_axis else (
-        nib.cifti2.cifti2_axes.SeriesAxis(start=0, step=source_header.get_axis(0).step, size=data.shape[0]) 
-        )
+    if data_img is None:
+        raise ValueError("Must supply either the brain_mask argument (for NIFTI) or an accepted source_header argument (for CIFTI), but neither were found")
     
-    data_img = nib.cifti2.cifti2.Cifti2Image(data, (ax0, source_header.get_axis(1)))
     nib.save(data_img, out_file)
-    return    
+    return
 
 
 def replace_entities(file:str, entities:dict):
@@ -409,8 +418,11 @@ def export_args_to_file(args,
 #     sys.exit(1)
 
 
-def rmtree_error_callback(func, path, exc_info):
-    shutil.rmtree(path)
+# def rmtree_error_callback(func, path, exc_info):
+#     if Path(path).exists():
+#         time.sleep(0.5)
+#         print("sleeping")
+#     shutil.rmtree(path)
 
 
 def clean_paths(path_list:list):
@@ -419,7 +431,7 @@ def clean_paths(path_list:list):
         path = Path(p)
         try:
             if path.is_dir():
-                shutil.rmtree(path, onerror=rmtree_error_callback)
+                shutil.rmtree(path)
             elif path.is_file():
                 os.remove(path)
             logger.info(f"removed the path: {path}")
@@ -432,18 +444,22 @@ def clean_paths(path_list:list):
     
 def logger_exception_hook(exctype, value, traceback):
     sys.__excepthook__(exctype, value, traceback)
-    logger.critical(f'Uncaught exception: {exctype.__name__} - {value}')
-    while traceback:
-        filename = traceback.tb_frame.f_code.co_filename
-        name = traceback.tb_frame.f_code.co_name
-        line_no = traceback.tb_lineno
-        traceback = traceback.tb_next
-        if traceback:
-            logger.critical(f"-- File {filename} line {line_no}, in {name} ")
+    try:
+        logger.critical(f'Uncaught exception: {exctype.__name__} - {value}')
+        while traceback:
+            filename = traceback.tb_frame.f_code.co_filename
+            name = traceback.tb_frame.f_code.co_name
+            line_no = traceback.tb_lineno
+            traceback = traceback.tb_next
+            if traceback:
+                logger.critical(f"-- File {filename} line {line_no}, in {name} ")
 
-    # Where the exception occured
-    logger.exception(f"File {filename} line {line_no}, in {name}", exc_info=(exctype, value, traceback))
-    finish_logging()
+        # Where the exception occured
+        logger.exception(f"File {filename} line {line_no}, in {name}", exc_info=(exctype, value, traceback))
+    except:
+        print("An unexpected error occured with the logging :(")
+    finally:
+        finish_logging()
 
 
 sys.excepthook = logger_exception_hook

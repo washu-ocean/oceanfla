@@ -1,16 +1,13 @@
 import argparse
 from pathlib import Path
-
-from sqlalchemy import exists
+import os
 from oceanfla.oceanparse import OceanParser
-import logging
 from oceanfla.utilities import export_args_to_file
+import logging
 import bids
-from oceanfla.workflows import print_timestamp
 from datetime import datetime
 
 VERSION = "1.1.4"
-logger = logging.getLogger("parser")
 
 
 def _build_parser():
@@ -116,7 +113,7 @@ def _build_parser():
 
     session_arguments = parser.add_argument_group("Session Specific")
 
-    session_arguments.add_argument("--subject", "-su", required=True,
+    session_arguments.add_argument("--subject", "-su", nargs="+", required=False,
                                    help="The subject ID")
 
     session_arguments.add_argument("--session", "-se", required=False,
@@ -148,7 +145,7 @@ def _build_parser():
     config_arguments.add_argument("--brain_mask", "-bm", type=ExistingFile,
                                   help="If the bold file type is volumetric data, a brain mask must also be supplied.")
 
-    config_arguments.add_argument("--func_space", default="fsLR",
+    config_arguments.add_argument("--func_space", default="fsLR", required=True,
                                   help="Space that the preprocessed data should be in (for example, 'T2w', 'MNIInfant', etc.)")
 
     config_arguments.add_argument("--fwhm", type=AboveZeroFloat,
@@ -282,12 +279,8 @@ def _build_parser():
     config_arguments.add_argument("--n_procs", type=PositiveInt, default=4,
                                   help="The number of CPUs to use for execution")
     
-    config_arguments.add_argument("--mem_gb", type=PositiveFloat, default=20,
+    config_arguments.add_argument("--mem_gb", type=PositiveFloat, default=10,
                                   help="The amount of memory to use in GB for execution")
-    
-    # config_arguments.add_argument("--reindex_bids", action="store_true",
-    #                               help="Flag to indicate that BIDS directories should be reindexed")
-
 
     return (parser, config_arguments)
 
@@ -313,13 +306,6 @@ def parse_args():
             parser.error(
                 "The 'custom_hrf' argument must be a file of type '.txt' and must exist")
 
-    # if args.bold_file_type[0] != ".":
-    #     args.bold_file_type = "." + args.bold_file_type
-    # if args.bold_file_type == ".nii" or args.bold_file_type == ".nii.gz":
-    #     args.imagetype = "nifti"
-    # else:
-    #     args.imagetype = "cifti"
-
     if args.parcellate:
         if (not args.parcellate.exists()) or (not args.parcellate.name.endswith(".dlabel.nii")):
             parser.error(
@@ -335,19 +321,16 @@ def parse_args():
     if callable(args.events_long):
         args.events_long = args.events_long(args)
 
+
+    # Create label for this execution attempt
     tstamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     execution_label = f"oceanfla_task-{'-'.join(args.task)}_{tstamp}"
 
     if not hasattr(args, "output_dir") or args.output_dir is None:
         args.output_dir = args.derivs_dir / args.derivs_subfolder
         # args.output_dir.mkdir(exist_ok = True)
-
-    args.log_dir = args.output_dir / "logs"
-    args.log_dir.mkdir(exist_ok = True, parents=True)
-    args.log_file = args.log_dir / f"{execution_label}.log"
-
-    args.log_level = logging.DEBUG if args.debug else logging.INFO
-
+    
+    # Make the working directory
     args.work_dir = args.work_dir / execution_label
     args.work_dir.mkdir(parents=False, exist_ok=False)
 
@@ -357,7 +340,6 @@ def parse_args():
         parser.error(
             f"The preprocessed outputs directory does not exist at path: {args.preproc_bids}")
     
-    print_timestamp("Indexing bids directories")
     raw_bids_db_path = args.work_dir / f".raw_indexer"
     args.raw_layout = bids.BIDSLayout(root=args.raw_bids,
                                       database_path=raw_bids_db_path,
@@ -371,24 +353,25 @@ def parse_args():
                                           validate=False,
                                           is_derivative=True,
                                           indexer=bids.BIDSLayoutIndexer(index_metadata=False))
-    # print_timestamp("Finished indexing bids directories")
-  
+
+    # Set up the logging
+    args.log_dir = args.output_dir / "logs"
+    if args.subject and len(args.subject) == 1:
+        if (args.preproc_bids / f"sub-{args.subject[0]}").exists():
+            args.log_dir = args.output_dir / f"sub-{args.subject[0]}" / "logs"
+    args.log_dir.mkdir(exist_ok = True, parents=True)
+    args.log_file = args.log_dir / f"{execution_label}.log"
+    args.log_level = logging.DEBUG if args.debug else logging.INFO
+
+    from oceanfla.config import set_configs, get_logger
+    set_configs(args.__dict__)
+    logger = get_logger("parser")
+    logger.info("hi in parser")
     # Export the current arguments to a file
     if args.export_args:
-        try:
-            assert args.export_args.parent.is_dir(), "Argument export path must be a file path in a directory that exists"
-            logger.info(f"####### Exporting Configuration Arguments to: '{args.export_args}' #######\n")
-            export_args_to_file(args, config_arguments, args.export_args)
-        except Exception as e:
-            logger.exception(e)
-            exit(1)
-            # exit_program_early(e)
+        assert args.export_args.parent.is_dir(), "Argument export path must be a file path in a directory that exists"
+        logger.info(f"####### Exporting Configuration Arguments to: '{args.export_args}' #######\n")
+        export_args_to_file(args, config_arguments, args.export_args)
 
-    # args.custom_desc = f"-{args.custom_desc}" if args.custom_desc else ""
-    # args.file_name_base = f"sub-{args.subject}_ses-{args.session}_task-{args.task}"
-
-    '''
-    TODO: create singleton options class so arguments are passed to each process
-    '''
-    from .config import set_configs
-    set_configs(args.__dict__)
+    # Change into the log directory
+    os.chdir(args.log_dir)
