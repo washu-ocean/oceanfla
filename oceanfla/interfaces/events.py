@@ -326,10 +326,11 @@ GetVolumeCount = Function(
 
 
 class ModifyEventsFileInputSpec(BaseInterfaceInputSpec):
-    events_file = File(exists=True,
-                       mandatory=True,
-                       desc="A BIDS style events file of type .tsv"
-                       )
+    events_file = File(
+        exists=True,
+        mandatory=True,
+        desc="A BIDS style events file of type .tsv"
+    )
     trial_type_map = traits.Union(
         traits.Dict(
             key_trait=traits.Str,
