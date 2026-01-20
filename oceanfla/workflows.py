@@ -1,3 +1,4 @@
+from ast import mod
 from nipype import Node, Workflow, Function
 from nipype.interfaces.io import BIDSDataGrabber
 from nipype.interfaces.utility import IdentityInterface, Select
@@ -5,7 +6,7 @@ from nipype.interfaces.workbench.cifti import CiftiSmooth
 from niworkflows.utils.bids import collect_participants
 from oceanfla.interfaces.utility import FLADataSink, ReadMetadataFile
 from oceanfla.interfaces.clean import FilterData, PercentChange
-from oceanfla.interfaces.events import EventsMatrix, GetVolumeCount
+from oceanfla.interfaces.events import EventsMatrix, GetVolumeCount, ModifyEventsFile
 from oceanfla.interfaces.exclusions import CheckRunRetention, CheckRuntSNR
 from oceanfla.interfaces.nuisance import GenerateNuisanceMatrix
 from oceanfla.interfaces.regression import ConcatRegressionData, RunGLMRegression
@@ -44,6 +45,7 @@ One oceanfla workflow with func_space workflows as children, which in part have 
 workflows as children that combine outputs to form a single regression workflow for each functional
 space.
 '''
+
 
 def build_oceanfla_wf(subjects: list[str] | str | None, base_dir=Path | str):
 
@@ -107,9 +109,9 @@ def build_session_wf(subject, session=None):
     input_node.inputs.session = session
 
     space_run_info = parse_session_bold_files(layout=all_opts.preproc_layout,
-                                                        subject=subject,
-                                                        session=session,
-                                                        tasks=all_opts.task)
+                                              subject=subject,
+                                              session=session,
+                                              tasks=all_opts.task)
     space_dict = space_run_info[all_opts.func_space]
     func_space_wf = build_func_space_wf(func_space=all_opts.func_space,
                                         run_map=space_dict["runs"],
@@ -179,7 +181,8 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
                     'extension': '.tsv',
                 }
             },
-            load_layout=Path(all_opts.preproc_layout.connection_manager.database_file).parent
+            load_layout=Path(
+                all_opts.preproc_layout.connection_manager.database_file).parent
         ),
         name="derivs_bidssrc_node"
     )
@@ -195,7 +198,8 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
                     'extension': '.tsv'
                 },
             },
-            load_layout=Path(all_opts.raw_layout.connection_manager.database_file).parent
+            load_layout=Path(
+                all_opts.raw_layout.connection_manager.database_file).parent
         ),
         name="raw_bidssrc_node"
     )
@@ -204,7 +208,7 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
         BIDSDataGrabber(
             base_dir=all_opts.preproc_bids,
             datatype='anat',
-            raise_on_empty = True,
+            raise_on_empty=True,
             output_query={
                 'lh': {
                     'suffix': 'midthickness',
@@ -212,14 +216,15 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
                     'extension': '.surf.gii',
                     'hemi': 'L'
                 },
-                'rh':{
+                'rh': {
                     'suffix': 'midthickness',
                     'space': ["fsLR", "dhcpAsym"],
                     'extension': '.surf.gii',
                     'hemi': 'R'
                 }
             },
-            load_layout=Path(all_opts.preproc_layout.connection_manager.database_file).parent
+            load_layout=Path(
+                all_opts.preproc_layout.connection_manager.database_file).parent
         ),
         name="surf_grabber_node"
     )
@@ -410,7 +415,7 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
     return workflow
 
 
-def build_run_workflow(run, task: str, file_extension:str):
+def build_run_workflow(run, task: str, file_extension: str):
     from oceanfla.interfaces.nuisance import make_regressor_run_specific
 
     ### Define the workflow and the inputnode ###
@@ -455,7 +460,7 @@ def build_run_workflow(run, task: str, file_extension:str):
         name="make_tmask_node"
     )
 
-    ### Check that this run passes exclusion criteria ### 
+    ### Check that this run passes exclusion criteria ###
     exclusion_wf = build_exclusion_wf(run, task)
 
     workflow.connect([
@@ -475,7 +480,6 @@ def build_run_workflow(run, task: str, file_extension:str):
             ("tmask_file", "tmask_file"),
         ])
     ])
-
 
     ### Create run-level event matrix ###
     get_metadata_node = Node(
@@ -503,18 +507,28 @@ def build_run_workflow(run, task: str, file_extension:str):
         name="events_matrix_node"
     )
 
-    ### Create run-level nuisance matrix ###
-    nuisance_mat_node = Node(
-        GenerateNuisanceMatrix(
-            confounds_columns=all_opts.confounds,
-            demean=(not all_opts.exclude_run_mean),
-            linear_trend=(not all_opts.exclude_run_trend),
-            spike_threshold=all_opts.fd_threshold if all_opts.spike_regression else None,
-            volterra_lag=all_opts.volterra_lag,
-            volterra_columns=all_opts.volterra_columns,
-        ),
-        name="nuisance_matrix_node"
-    )
+    if all_opts.group or all_opts.ignore:
+        modify_events_file_node = Node(
+            ModifyEventsFile(
+                trait_type_map=all_opts.group,
+                removal_list=all_opts.ignore,
+            ),
+            name="modify_events_file_node"
+        )
+        workflow.connect([
+            (inputnode, modify_events_file_node, [
+                ("events_file", "events_file")
+            ]),
+            (modify_events_file_node, events_matrix_node, [
+                ("events_out", "event_file")
+            ])
+        ])
+    else:
+        workflow.connect([
+            (inputnode, events_matrix_node, [
+                ("events_file", "event_file")
+            ])
+        ])
 
     if all_opts.repetition_time:
         events_matrix_node.inputs.tr = all_opts.repetition_time
@@ -534,25 +548,38 @@ def build_run_workflow(run, task: str, file_extension:str):
         ]),
         (get_volumes_node, events_matrix_node, [
             ("volumes", "volumes")
-        ]),
-        (inputnode, events_matrix_node, [
-            ("events_file", "event_file")
-        ]),
+        ])
+    ])
+
+    ### Create run-level nuisance matrix ###
+    nuisance_mat_node = Node(
+        GenerateNuisanceMatrix(
+            confounds_columns=all_opts.confounds,
+            demean=(not all_opts.exclude_run_mean),
+            linear_trend=(not all_opts.exclude_run_trend),
+            spike_threshold=all_opts.fd_threshold if all_opts.spike_regression else None,
+            volterra_lag=all_opts.volterra_lag,
+            volterra_columns=all_opts.volterra_columns,
+        ),
+        name="nuisance_matrix_node"
+    )
+    workflow.connect([
         (inputnode, nuisance_mat_node, [
             ("confounds_file", "confounds_file")
         ])
     ])
+
     last_func_node = inputnode
 
     if all_opts.debug:
         # save out the working files
         event_matrix_ds = Node(FLADataSink(
-                base_directory=all_opts.derivs_dir,
-                out_path_base=all_opts.derivs_subfolder,
-                extra_bids_patterns=all_opts.bids_patterns,
-                desc="modeled",
-                suffix="events"
-            ),
+            base_directory=all_opts.derivs_dir,
+            out_path_base=all_opts.derivs_subfolder,
+            extra_bids_patterns=all_opts.bids_patterns,
+            desc="modeled",
+            suffix="events"
+        ),
             name="event_matrix_ds"
         )
         workflow.connect([
@@ -569,7 +596,7 @@ def build_run_workflow(run, task: str, file_extension:str):
             out_path_base=all_opts.derivs_subfolder,
             extra_bids_patterns=all_opts.bids_patterns,
             desc="nuisance",
-            ),
+        ),
             name="nuisance_matrix_ds"
         )
         workflow.connect([
@@ -580,7 +607,7 @@ def build_run_workflow(run, task: str, file_extension:str):
                 ("nuisance_matrix", "in_file")
             ])
         ])
-        
+
         make_tmask_tsv_node = Node(
             MakeTmaskTsv,
             name="make_tmask_tsv_node"
@@ -591,7 +618,7 @@ def build_run_workflow(run, task: str, file_extension:str):
             out_path_base=all_opts.derivs_subfolder,
             extra_bids_patterns=all_opts.bids_patterns,
             suffix="tmask"
-            ),
+        ),
             name="tmask_ds"
         )
         workflow.connect([
@@ -605,7 +632,6 @@ def build_run_workflow(run, task: str, file_extension:str):
                 ("tmask_tsv", "in_file")
             ])
         ])
-
 
     ### Smooth the data if requested ###
     if all_opts.fwhm:
@@ -624,19 +650,19 @@ def build_run_workflow(run, task: str, file_extension:str):
             ]),
         ])
         last_func_node = smoothing_wf.get_node("outputnode")
-        
+
         if all_opts.debug:
             smoothed_ds = Node(FLADataSink(
-                    base_directory=all_opts.derivs_dir,
-                    out_path_base=all_opts.derivs_subfolder,
-                    extra_bids_patterns=all_opts.bids_patterns,
-                    compress=compress_files,
-                    dismiss_entities=["den"],
-                    desc="smooth",
-                    allowed_entities=("fwhm"),
-                    fwhm=str(all_opts.fwhm).replace(".","p")
-                ),
-                name = "smoothed_bold_ds"
+                base_directory=all_opts.derivs_dir,
+                out_path_base=all_opts.derivs_subfolder,
+                extra_bids_patterns=all_opts.bids_patterns,
+                compress=compress_files,
+                dismiss_entities=["den"],
+                desc="smooth",
+                allowed_entities=("fwhm"),
+                fwhm=str(all_opts.fwhm).replace(".", "p")
+            ),
+                name="smoothed_bold_ds"
             )
             workflow.connect([
                 (smoothing_wf, smoothed_ds, [
@@ -646,7 +672,6 @@ def build_run_workflow(run, task: str, file_extension:str):
                     ("bold_file", "source_file")
                 ])
             ])
-
 
     ### Percent signal change ###
     if all_opts.percent_change:
@@ -669,13 +694,13 @@ def build_run_workflow(run, task: str, file_extension:str):
         last_func_node = percent_change_node
         if all_opts.debug:
             percent_change_ds = Node(FLADataSink(
-                    base_directory=all_opts.derivs_dir,
-                    out_path_base=all_opts.derivs_subfolder,
-                    extra_bids_patterns=all_opts.bids_patterns,
-                    compress=compress_files,
-                    dismiss_entities=["den"],
-                    desc="percentChange",
-                ),
+                base_directory=all_opts.derivs_dir,
+                out_path_base=all_opts.derivs_subfolder,
+                extra_bids_patterns=all_opts.bids_patterns,
+                compress=compress_files,
+                dismiss_entities=["den"],
+                desc="percentChange",
+            ),
                 name="percent_change_bold_ds"
             )
             workflow.connect([
@@ -686,7 +711,6 @@ def build_run_workflow(run, task: str, file_extension:str):
                     ("bold_file", "source_file")
                 ])
             ])
-
 
     ### Nuisance regression ###
     if all_opts.nuisance_regression:
@@ -719,13 +743,13 @@ def build_run_workflow(run, task: str, file_extension:str):
 
         if all_opts.debug:
             regressed_bold_ds = Node(FLADataSink(
-                    base_directory=all_opts.derivs_dir,
-                    out_path_base=all_opts.derivs_subfolder,
-                    extra_bids_patterns=all_opts.bids_patterns,
-                    compress=compress_files,
-                    dismiss_entities=["den"],
-                    desc="nuisanceRegressed"
-                ),
+                base_directory=all_opts.derivs_dir,
+                out_path_base=all_opts.derivs_subfolder,
+                extra_bids_patterns=all_opts.bids_patterns,
+                compress=compress_files,
+                dismiss_entities=["den"],
+                desc="nuisanceRegressed"
+            ),
                 name="regressed_bold_ds"
             )
             workflow.connect([
@@ -738,16 +762,16 @@ def build_run_workflow(run, task: str, file_extension:str):
             ])
 
             nuisance_betas_ds = Node(FLADataSink(
-                    base_directory=all_opts.derivs_dir,
-                    out_path_base=all_opts.derivs_subfolder,
-                    extra_bids_patterns=all_opts.bids_patterns,
-                    compress=compress_files,
-                    dismiss_entities=["den"],
-                    desc="nuisanceRegression",
-                    suffix="boldmap",
-                    stat="effect",
-                    allowed_entities=("condition", "stat", "den")
-                ),
+                base_directory=all_opts.derivs_dir,
+                out_path_base=all_opts.derivs_subfolder,
+                extra_bids_patterns=all_opts.bids_patterns,
+                compress=compress_files,
+                dismiss_entities=["den"],
+                desc="nuisanceRegression",
+                suffix="boldmap",
+                stat="effect",
+                allowed_entities=("condition", "stat", "den")
+            ),
                 name="nuisance_betas_ds"
             )
             workflow.connect([
@@ -755,26 +779,26 @@ def build_run_workflow(run, task: str, file_extension:str):
                     ("outputnode.beta_files", "in_file"),
                     ("outputnode.beta_labels", "condition")
                 ]),
-                (inputnode , nuisance_betas_ds, [
+                (inputnode, nuisance_betas_ds, [
                     ("bold_file", "source_file")
                 ])
             ])
 
             design_file_ds = Node(FLADataSink(
-                    base_directory=all_opts.derivs_dir,
-                    out_path_base=all_opts.derivs_subfolder,
-                    extra_bids_patterns=all_opts.bids_patterns,
-                    compress=compress_files,
-                    desc="nuisanceRegression",
-                    suffix="design"
-                ),
+                base_directory=all_opts.derivs_dir,
+                out_path_base=all_opts.derivs_subfolder,
+                extra_bids_patterns=all_opts.bids_patterns,
+                compress=compress_files,
+                desc="nuisanceRegression",
+                suffix="design"
+            ),
                 name="design_file_ds"
             )
             workflow.connect([
                 (regression_wf, design_file_ds, [
                     ("outputnode.design_matrix", "in_file"),
                 ]),
-                (inputnode , design_file_ds, [
+                (inputnode, design_file_ds, [
                     ("confounds_file", "source_file")
                 ])
             ])
@@ -788,7 +812,6 @@ def build_run_workflow(run, task: str, file_extension:str):
                 ("nuisance_matrix", "nuisance_matrix")
             ])
         ])
-
 
     ### Bandpass filter ###
     if all_opts.highpass or all_opts.lowpass:
@@ -812,7 +835,7 @@ def build_run_workflow(run, task: str, file_extension:str):
                 ("tmask_file", "tmask_in")
             ])
         ])
-        
+
         if all_opts.repetition_time:
             filter_node.inputs.tr = all_opts.repetition_time
         else:
@@ -831,7 +854,7 @@ def build_run_workflow(run, task: str, file_extension:str):
                 allowed_entites=("hp", "lp"),
                 dismiss_entities=["den"],
                 desc="filtered",
-                ),
+            ),
                 name="filtered_bold_ds"
             )
             if all_opts.highpass:
@@ -849,7 +872,6 @@ def build_run_workflow(run, task: str, file_extension:str):
             ])
 
         last_func_node = filter_node
-
 
     ### Connect final bold output ###
     workflow.connect([
@@ -972,7 +994,7 @@ def build_exclusion_wf(run, task):
         name="outputnode"
     )
 
-    ### Create tSNR node ### 
+    ### Create tSNR node ###
     tsnr_check_node = Node(
         CheckRuntSNR(
             tsnr_threshold=all_opts.min_average_tsnr,
@@ -994,7 +1016,7 @@ def build_exclusion_wf(run, task):
         name="merge_validations_node"
     )
 
-    and_all_func = lambda validation_list : all(validation_list)
+    def and_all_func(validation_list): return all(validation_list)
     check_validation_node = Node(
         Function(
             function=and_all_func,
@@ -1029,13 +1051,13 @@ def build_exclusion_wf(run, task):
     return workflow
 
 
-
-def build_smoothing_wf(run, task: str, file_extension:str):
+def build_smoothing_wf(run, task: str, file_extension: str):
     from nibabel.processing import fwhm2sigma
 
     ### Define the workflow and the inputnode ###
     geom_label = "surface" if is_cifti_file(file_extension) else "volume"
-    workflow = Workflow(name=f"task_{task}_run_{run}_{geom_label}_smoothing_wf")
+    workflow = Workflow(
+        name=f"task_{task}_run_{run}_{geom_label}_smoothing_wf")
     inputnode = Node(
         IdentityInterface(
             fields=[
@@ -1062,11 +1084,12 @@ def build_smoothing_wf(run, task: str, file_extension:str):
             CiftiSmooth(
                 sigma_surf=fwhm2sigma(all_opts.fwhm),
                 sigma_vol=fwhm2sigma(all_opts.fwhm),
-                direction = "COLUMN",
+                direction="COLUMN",
             ),
             name="surface_smooth_node"
         )
-        surface_smooth_node.inputs.environ.update({"OMP_NUM_THREADS": str(all_opts.n_procs)})
+        surface_smooth_node.inputs.environ.update(
+            {"OMP_NUM_THREADS": str(all_opts.n_procs)})
 
         workflow.connect([
             (inputnode, surface_smooth_node, [
@@ -1091,7 +1114,8 @@ def build_smoothing_wf(run, task: str, file_extension:str):
             ),
             name="volume_smooth_node"
         )
-        volume_smooth_node.inputs.environ.update({"OMP_NUM_THREADS":str(all_opts.n_procs)})
+        volume_smooth_node.inputs.environ.update(
+            {"OMP_NUM_THREADS": str(all_opts.n_procs)})
         workflow.connect([
             (inputnode, volume_smooth_node, [
                 ("bold_file", "volume_in")
@@ -1102,8 +1126,3 @@ def build_smoothing_wf(run, task: str, file_extension:str):
         ])
 
     return workflow
-
-
-        
-
-        

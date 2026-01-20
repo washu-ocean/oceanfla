@@ -1,8 +1,8 @@
 from nipype.interfaces.base import (
-    SimpleInterface, 
-    BaseInterfaceInputSpec, 
-    traits, 
-    File, 
+    SimpleInterface,
+    BaseInterfaceInputSpec,
+    traits,
+    File,
     TraitedSpec
 )
 from pathlib import Path
@@ -102,7 +102,7 @@ def make_design_matrix(event_file: str | Path,
     if (fir and hrf) and not (fir_vars or hrf_vars):
         raise RuntimeError(
             "Both FIR and HRF were specified, but you need to specify at least one list of variables (fir_vars or hrf_vars)")
-    
+
     # fir_vars and hrf_vars must not have overlapping columns
     if (fir_vars and hrf_vars) and not set(fir_vars).isdisjoint(hrf_vars):
         raise RuntimeError(
@@ -111,7 +111,7 @@ def make_design_matrix(event_file: str | Path,
         events_matrix.columns)]  # unique trial types
     residual_conditions = [
         c for c in conditions if c not in unmodeled] if unmodeled else conditions
-    
+
     # Create other list if only one is specified
     if (fir and hrf) and (bool(fir_vars) ^ bool(hrf_vars)):
         if fir_vars:
@@ -203,7 +203,7 @@ def _make_events_long(event_file: Path, volumes: int, tr: float):
         return (array[idx])
 
     duration = tr * volumes
-    events_df = pd.read_csv(event_file, index_col=None, delimiter="\t")
+    events_df = pd.read_csv(event_file, sep="\t")
     conditions = [s for s in np.unique(events_df.trial_type)]
     events_long = pd.DataFrame(
         0, columns=conditions, index=np.arange(0, duration, tr)[:volumes])
@@ -323,3 +323,69 @@ GetVolumeCount = Function(
     input_names=["bold_in", "brain_mask"],
     output_names=["volumes"]
 )
+
+
+class ModifyEventsFileInputSpec(BaseInterfaceInputSpec):
+    events_file = File(exists=True,
+                       mandatory=True,
+                       desc="A BIDS style events file of type .tsv"
+                       )
+    trial_type_map = traits.Union(
+        traits.Dict(
+            key_trait=traits.Str,
+            value_trait=traits.Str,
+            desc="A dictionary mapping 'trial_type' names in the event file to new names"
+        ),
+        None,
+        default_value=None
+    )
+    removal_list = traits.Union(
+        traits.List(
+            item_trait=traits.Str,
+            desc="A list of 'trial_type' values to remove from the file"
+        ),
+        None,
+        default_value=None
+    )
+
+
+class ModifyEventsFileOutputSpec(TraitedSpec):
+    events_out = File(
+        exists=True,
+        desc="the modified events file"
+    )
+
+
+class ModifyEventsFile(SimpleInterface):
+    input_spec = ModifyEventsFileInputSpec
+    output_spec = ModifyEventsFileOutputSpec
+
+    def _run_interface(self, runtime):
+
+        self._results["events_out"] = modify_events_file(
+            events_file=self.inputs.events_file,
+            trial_type_map=self.inputs.trial_type_map,
+            removal_list=self.inputs.removal_list
+        )
+
+        return runtime
+
+
+def modify_events_file(events_file: str | Path,
+                       trial_type_map: dict,
+                       removal_list: list[str]):
+    import pandas as pd
+    from oceanfla.utilities import replace_entities
+
+    events_df = pd.read_csv(events_file, sep="\t")
+
+    # rename the trial types
+    events_df['trial_type'] = events_df["trial_type"].replace(trial_type_map)
+
+    # remove trials of a certain type
+    events_df_mod = events_df[events_df["trial_type"] not in removal_list]
+
+    out_file = replace_entities(
+        events_file, {"suffix": "modified-events", "ext": ".tsv", "path": None})
+    events_df_mod.to_csv(out_file, sep="\t", index=False)
+    return out_file

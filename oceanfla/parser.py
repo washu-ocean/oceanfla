@@ -70,10 +70,10 @@ def _build_parser():
                 f"The value(s) supplied must be numerical and greater than or equal to zero: {val}"
             )
         return out
-    
+
     def PositiveInt(val):
         return PositiveVal(val, int)
-    
+
     def AboveZeroInt(val):
         i_val = PositiveInt(val)
         if i_val <= 0:
@@ -84,7 +84,7 @@ def _build_parser():
 
     def PositiveFloat(val):
         return PositiveVal(val, float)
-    
+
     def AboveZeroFloat(val):
         f_val = PositiveFloat(val)
         if f_val <= 0:
@@ -92,7 +92,7 @@ def _build_parser():
                 f"The value(s) supplied must be greater than zero: {val}"
             )
         return f_val
-    
+
     def Percent(val):
         f_val = PositiveFloat(val)
         if f_val > 100 or f_val < 0:
@@ -132,15 +132,11 @@ def _build_parser():
     session_arguments.add_argument("--debug", action="store_true",
                                    help="Use this flag to save intermediate outputs for a chance to debug inputs")
 
-
     config_arguments = parser.add_argument_group(
         "Configuration Arguments", "These arguments are saved to a file if the '--export_args' option is used")
 
     config_arguments.add_argument("--task", "-t", nargs="+", required=True,
                                   help="The name of the task to analyze.")
-
-    # config_arguments.add_argument("--bold_file_type", "-ft", required=True,
-    #                               help="The file type of the functional runs to use.")
 
     config_arguments.add_argument("--brain_mask", "-bm", type=ExistingFile,
                                   help="If the bold file type is volumetric data, a brain mask must also be supplied.")
@@ -165,7 +161,7 @@ def _build_parser():
 
     config_arguments.add_argument("--output_dir", "-o", type=ExistingDir,
                                   help="Alternate Path to a directory to store the results of this analysis. Default is '[derivs_dir]/first_level/'")
-    
+
     config_arguments.add_argument("--work_dir", "-w", type=ExistingDir,
                                   help="Path to a working directory to store intermediate outputs")
 
@@ -190,9 +186,17 @@ def _build_parser():
     config_arguments.add_argument("--custom_hrf", "-ch", type=ExistingFile,
                                   help="The path to a txt file containing the timeseries for a custom hrf to use instead of the double gamma hrf")
 
-    config_arguments.add_argument("--unmodeled", "-um", nargs="*",
+    config_arguments.add_argument("--unmodeled", "-um", nargs="+",
                                   help="""A list of the task regressors to leave unmodeled, but still included in the final design matrix. These are 
                                   typically continuous variables that need not be modeled with hrf or fir, but any of the task regressors can be included.""")
+
+    config_arguments.add_argument("--ignore", "-i", nargs="+",
+                                  help="A list of task regressors to ignore, and NOT include in your model.")
+
+    config_arguments.add_argument("--group", "-g", nargs="+", action="append",
+                                  help="""A list of the task regressors to group as one, followed by the name of the new regressor. The list of regressors must 
+                                  include at least 2, meaning the minimum argument length is 3 elements; at least two regressors to group, and the new name 
+                                  of the variable. This argument can be used multiple times group, each use defines one new grouping. ex) '--group orig_event1 orig_event2 event_new'""")
 
     config_arguments.add_argument("--start_censoring", "-sc", type=PositiveInt, default=0,
                                   help="The number of frames to censor out at the beginning of each run. Typically used to censor scanner equilibrium time. Default is 0")
@@ -215,13 +219,13 @@ def _build_parser():
     config_arguments.add_argument("--detrend_data", "-dd", action="store_true",
                                   help="""Flag to demean and detrend the data before modeling. The default is to include 
                                   a mean and trend line into the nuisance matrix instead.""")
-    
+
     config_arguments.add_argument("--percent_change", "-pc", action="store_true",
                                   help="""Flag to convert data to percent signal change.""")
-    
+
     config_arguments.add_argument("--exclude_run_mean", action="store_true",
                                   help="Flag to indicate that you do not want to include a run-level means into the model.")
-    
+
     config_arguments.add_argument("--exclude_run_trend", action="store_true",
                                   help="Flag to indicate that you do not want to include a run-level trends into the model.")
 
@@ -237,7 +241,7 @@ def _build_parser():
 
     config_arguments.add_argument("--run_exclusion_threshold", "-re", type=Percent, default=0.0,
                                   help="The percent of frames a run must retain after high motion censoring to be included in the fine GLM. Only has effect when '--fd_censoring' is active.")
-    
+
     config_arguments.add_argument("--min_average_tsnr", type=PositiveFloat, default=0.0,
                                   help="The minimum whole-brain-average TSNR (across unmasked frames) required for a run to be included in analysis.")
 
@@ -257,7 +261,8 @@ def _build_parser():
                                   is supplied but no value is given, then the value will default to 0.1 Hz""")
 
     config_arguments.add_argument("--filter_padtype", default="mean",
-                                  choices=["odd", "even", "zero", "none", "mean", "edge"],
+                                  choices=["odd", "even", "zero",
+                                           "none", "mean", "edge"],
                                   help="Type of padding to use for low-, high-, or band-pass filter, if one is applied. The default is 'mean'")
 
     config_arguments.add_argument("--filter_padlen", type=PositiveInt, default=50,
@@ -275,10 +280,10 @@ def _build_parser():
 
     config_arguments.add_argument("--stdscale_glm", choices=["runlevel", "seslevel", "both", "none"], default="seslevel",
                                   help="Option to standard scale concatenated timeseries before running final GLM (after masking & nuisance regression)")
-    
+
     config_arguments.add_argument("--n_procs", type=PositiveInt, default=4,
                                   help="The number of CPUs to use for execution")
-    
+
     config_arguments.add_argument("--mem_gb", type=PositiveFloat, default=10,
                                   help="The amount of memory to use in GB for execution")
 
@@ -321,6 +326,16 @@ def parse_args():
     if callable(args.events_long):
         args.events_long = args.events_long(args)
 
+    if args.group:
+        gmap = dict()
+        for regroup in args.group:
+            if len(regroup) < 3:
+                parser.error(
+                    "Each use of the '--group' argument must have a least 3 values")
+            group_rename = regroup[-1]
+            for i in range(len(regroup)-1):
+                gmap[regroup[i]] = group_rename
+        args.group = gmap
 
     # Create label for this execution attempt
     tstamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -329,7 +344,7 @@ def parse_args():
     if not hasattr(args, "output_dir") or args.output_dir is None:
         args.output_dir = args.derivs_dir / args.derivs_subfolder
         # args.output_dir.mkdir(exist_ok = True)
-    
+
     # Make the working directory
     args.work_dir = args.work_dir / execution_label
     args.work_dir.mkdir(parents=False, exist_ok=False)
@@ -339,17 +354,17 @@ def parse_args():
     if not args.preproc_bids.exists():
         parser.error(
             f"The preprocessed outputs directory does not exist at path: {args.preproc_bids}")
-    
+
     raw_bids_db_path = args.work_dir / f".raw_indexer"
     args.raw_layout = bids.BIDSLayout(root=args.raw_bids,
                                       database_path=raw_bids_db_path,
-                                    #   reset_database=True,
+                                      #   reset_database=True,
                                       validate=False,
                                       indexer=bids.BIDSLayoutIndexer(index_metadata=False))
     preproc_bids_db_path = args.work_dir / f".preproc_indexer"
     args.preproc_layout = bids.BIDSLayout(root=args.preproc_bids,
                                           database_path=preproc_bids_db_path,
-                                        #   reset_database=True,
+                                          #   reset_database=True,
                                           validate=False,
                                           is_derivative=True,
                                           indexer=bids.BIDSLayoutIndexer(index_metadata=False))
@@ -359,7 +374,7 @@ def parse_args():
     if args.subject and len(args.subject) == 1:
         if (args.preproc_bids / f"sub-{args.subject[0]}").exists():
             args.log_dir = args.output_dir / f"sub-{args.subject[0]}" / "logs"
-    args.log_dir.mkdir(exist_ok = True, parents=True)
+    args.log_dir.mkdir(exist_ok=True, parents=True)
     args.log_file = args.log_dir / f"{execution_label}.log"
     args.log_level = logging.DEBUG if args.debug else logging.INFO
 
@@ -369,8 +384,10 @@ def parse_args():
     logger.info("hi in parser")
     # Export the current arguments to a file
     if args.export_args:
-        assert args.export_args.parent.is_dir(), "Argument export path must be a file path in a directory that exists"
-        logger.info(f"####### Exporting Configuration Arguments to: '{args.export_args}' #######\n")
+        assert args.export_args.parent.is_dir(
+        ), "Argument export path must be a file path in a directory that exists"
+        logger.info(
+            f"####### Exporting Configuration Arguments to: '{args.export_args}' #######\n")
         export_args_to_file(args, config_arguments, args.export_args)
 
     # Change into the log directory
