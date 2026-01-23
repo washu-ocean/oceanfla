@@ -510,7 +510,7 @@ def build_run_workflow(run, task: str, file_extension: str):
     if all_opts.group or all_opts.ignore:
         modify_events_file_node = Node(
             ModifyEventsFile(
-                trait_type_map=all_opts.group,
+                trial_type_map=all_opts.group,
                 removal_list=all_opts.ignore,
             ),
             name="modify_events_file_node"

@@ -15,7 +15,7 @@ class Options():
     _instance = None
     _initialized = False
     layouts = []
-    nipype_loggers = ["nipype.workflow", "nipype.utils", "nipype.interface"]
+    logger_names = ["nipype.workflow", "nipype.utils", "nipype.interface"]
     generic_nuisance_columns = ["mean", "trend", "spike"]
     _pattern_file = Path(__file__).resolve().parent / "resources" / "bids_paths.json"
     log_format = '%(asctime)s,%(msecs)d %(name)-2s %(levelname)-2s:\n\t %(message)s'
@@ -39,7 +39,7 @@ class Options():
             log_process, log_queue = config_logging_process(self.log_file, self.log_level, self.log_format)
             setattr(self, 'log_queue', log_queue)
             setattr(self, 'log_process', log_process)
-            for log_name in self.nipype_loggers:
+            for log_name in self.logger_names:
                 logger = get_logger(log_name, log_queue)
                 logger.setLevel(self.log_level)
             

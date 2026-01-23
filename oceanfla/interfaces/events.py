@@ -285,6 +285,139 @@ def _hrf_convolve_features(features,
     return convolved_features
 
 
+def _hrf_add_signal(features,
+                           column_names: list = None,
+                           time_col: str = 'index',
+                           units: str = 's',
+                           time_to_peak: int = 5,
+                           undershoot_dur: int = 12,
+                           custom_hrf: Path = None):
+    """
+    This function convolves a hemodynamic response function with each column in a timeseries dataframe.
+
+    Parameters
+    ----------
+    features: DataFrame
+        A Pandas dataframe with the feature signals to convolve.
+    column_names: list
+        List of columns names to use; if it is None, use all columns. Default is None.
+    time_col: str
+        The name of the time column to use if not the index. Default is "index".
+    units: str
+        Must be 'ms','s','m', or 'h' to denote milliseconds, seconds, minutes, or hours respectively.
+    time_to_peak: int
+        Time to peak for HRF model. Default is 5 seconds.
+    undershoot_dur: int
+        Undershoot duration for HRF model. Default is 12 seconds.
+
+    Returns
+    -------
+    convolved_features: DataFrame
+        The HRF-convolved feature timeseries
+    """
+    import pandas as pd
+    import numpy as np
+
+    if not column_names:
+        column_names = features.columns
+
+    if time_col == 'index':
+        time = features.index.to_numpy()
+    else:
+        time = features[time_col]
+        features.index = time
+
+    if units == 'm' or units == 'minutes':
+        features.index = features.index * 60
+        time = features.index.to_numpy()
+    if units == 'h' or units == 'hours':
+        features.index = features.index * 3600
+        time = features.index.to_numpy()
+    if units == 'ms' or units == 'milliseconds':
+        features.index = features.index / 1000
+        time = features.index.to_numpy()
+
+    convolved_features = pd.DataFrame(index=time)
+    for a in column_names:
+        event_indices = features[features[a] > 0].index.to_list()
+        convolved_features.loc[:, a] = 0
+        for ei in event_indices: 
+            onset = ei - features.loc[a, ei]
+            rel_time = features.loc[ei:, a].index.to_numpy() - onset
+            hrf_sig = create_hrf(rel_time, time_to_peak=time_to_peak, undershoot_dur=undershoot_dur)
+            convolved_features.loc[ei:, a] += hrf_sig
+            #TODO if custom hrf, fit spline, then resample with rel_time
+  
+    # hrf_sig = np.loadtxt(custom_hrf) if custom_hrf is not None else create_hrf(
+    #     time, time_to_peak=time_to_peak, undershoot_dur=undershoot_dur)
+
+    # for a in column_names:
+    #     convolved_features[a] = np.convolve(features[a], hrf_sig)[:len(time)]
+
+    return convolved_features
+
+def _make_events_percise(event_file: Path, volumes: int, tr: float, assumed_cols=None):
+    """
+    Takes and event file and a funtional run and creates a long formatted events file
+    that maps the onset of task events to a frame of the functional run
+
+    :param func_data: A numpy array-like object representing functional data
+    :type bold_run: npt.ArrayLike
+    :param event_file: path to the event timing file
+    :type event_file: pathlib.Path
+    :param tr: Repetition time of the function run in seconds
+    :type tr: float
+    :param output_file: file path (including name) to save the long formatted event file to
+    :type output_file: pathlib.Path
+    """
+    import pandas as pd
+    import numpy as np
+
+    def find_nearest(array, value):
+        """
+        Finds the smallest difference in 'value' and one of the
+        elements of 'array', and returns the index of the element
+
+        :param array: a list of elements to compare value to
+        :type array: a list or list-like object
+        :param value: a value to compare to elements of array
+        :type value: integer or float
+        :return: integer index of array
+        :rtype: int
+        """
+        array = np.asarray(array)
+        idx = (np.abs(array - value)).argmin()
+        return (array[idx])
+
+    duration = tr * volumes
+    events_df = pd.read_csv(event_file, sep="\t")
+    conditions = [s for s in np.unique(events_df.trial_type)]
+    events_long = pd.DataFrame(
+        pd.NA , columns=conditions, index=np.arange(0, duration, tr)[:volumes])
+
+    # if assumed:
+    for e in events_df.index:
+        i = find_nearest(events_long.index, events_df.loc[e, 'onset'])
+        if assumed_cols and events_df.loc[e, 'trial_type'] in assumed_cols:
+            events_long.loc[i, events_df.loc[e, 'trial_type']] = i - events_df.loc[e, 'onset']
+            if events_df.loc[e, 'duration'] > tr:
+                offset = events_df.loc[e, 'onset'] + events_df.loc[e, 'duration']
+                j = find_nearest(events_long.index, offset)
+                for k in events_df.loc[i:j, :].index: events_long.loc[k, events_df.loc[e, 'trial_type']] = k - events_df.loc[e, 'onset']
+        else:
+            events_long.loc[i, events_df.loc[e, 'trial_type']] = 1
+            if events_df.loc[e, 'duration'] > tr:
+                offset = events_df.loc[e, 'onset'] + events_df.loc[e, 'duration']
+                j = find_nearest(events_long.index, offset)
+                events_long.loc[i:j, events_df.loc[e, 'trial_type']] = 1
+
+    # if output_file and output_file.suffix == ".csv":
+    #     logger.debug(f" saving events long to file: {output_file}")
+    #     events_long.to_csv(output_file)
+
+    return events_long
+
+
 def create_hrf(time, time_to_peak=5, undershoot_dur=12):
     from scipy.stats import gamma
     """
@@ -304,7 +437,6 @@ def create_hrf(time, time_to_peak=5, undershoot_dur=12):
     hrf_timeseries: numpy array
         The y-values for the HRF at each time point
     """
-
     peak = gamma.pdf(time, time_to_peak)
     undershoot = gamma.pdf(time, undershoot_dur)
     hrf_timeseries = peak - 0.35 * undershoot
@@ -332,21 +464,17 @@ class ModifyEventsFileInputSpec(BaseInterfaceInputSpec):
         desc="A BIDS style events file of type .tsv"
     )
     trial_type_map = traits.Union(
-        traits.Dict(
-            key_trait=traits.Str,
-            value_trait=traits.Str,
-            desc="A dictionary mapping 'trial_type' names in the event file to new names"
-        ),
+        traits.DictStrStr(),
         None,
-        default_value=None
+        desc="A dictionary mapping 'trial_type' names in the event file to new names"
     )
     removal_list = traits.Union(
         traits.List(
-            item_trait=traits.Str,
-            desc="A list of 'trial_type' values to remove from the file"
+            item_trait=traits.Str
         ),
         None,
-        default_value=None
+        default_value=None,
+        desc="A list of 'trial_type' values to remove from the file"
     )
 
 
@@ -381,12 +509,14 @@ def modify_events_file(events_file: str | Path,
     events_df = pd.read_csv(events_file, sep="\t")
 
     # rename the trial types
-    events_df['trial_type'] = events_df["trial_type"].replace(trial_type_map)
+    if trial_type_map:
+        events_df['trial_type'] = events_df["trial_type"].replace(trial_type_map)
 
     # remove trials of a certain type
-    events_df_mod = events_df[events_df["trial_type"] not in removal_list]
+    if removal_list:
+        events_df = events_df[~events_df["trial_type"].isin(removal_list)]
 
     out_file = replace_entities(
         events_file, {"suffix": "modified-events", "ext": ".tsv", "path": None})
-    events_df_mod.to_csv(out_file, sep="\t", index=False)
+    events_df.to_csv(out_file, sep="\t", index=False)
     return out_file
