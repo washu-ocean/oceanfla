@@ -391,7 +391,7 @@ def combine_regression_data(func_list: list,
         residual_design.to_csv(residual_design_file, index=False, sep="\t")
 
     if global_mean:
-        final_design.loc[:, "global_mean"] = 1
+        final_design.loc[:, "intercept"] = 1
 
     final_design_file = replace_entities(
         file=event_matrix_files[0],

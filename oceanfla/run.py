@@ -1,6 +1,5 @@
 from oceanfla.parser import parse_args
 from nipype import config as ncfg
-from pathlib import Path
 # import cProfile
 
 
@@ -8,7 +7,6 @@ def main():
 
     parse_args()
     from oceanfla.config import all_opts, get_logger, finish_logging, close_layouts
-    # from nipype import config as ncfg
     from oceanfla.workflows import build_oceanfla_wf
     from oceanfla.utilities import clean_paths
     logger = get_logger("nipype.workflow")

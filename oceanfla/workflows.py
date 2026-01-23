@@ -918,11 +918,11 @@ def build_regression_workflow(tasks, run=None, regression_columns=None):
         ),
         name="outputnode"
     )
+    need_mean = (not all_opts.no_global_mean) if run is None else all_opts.exclude_run_mean
 
     concat_data_node = Node(
         ConcatRegressionData(
-            include_global_mean=((run is None) and (
-                not all_opts.no_global_mean)),
+            include_global_mean=need_mean,
             tasks=tasks,
             brain_mask=all_opts.brain_mask,
         ),

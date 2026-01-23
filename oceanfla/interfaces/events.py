@@ -9,9 +9,6 @@ from pathlib import Path
 from nipype import logging, Function
 
 
-# logger = logging.getLogger("nipype.interface")
-
-
 class EventsMatrixInputSpec(BaseInterfaceInputSpec):
     event_file = File(exists=True, mandatory=True,
                       desc="A BIDS style events file of type .tsv")
