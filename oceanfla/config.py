@@ -6,7 +6,6 @@ import logging
 from logging.handlers import QueueHandler
 
 
-
 class Options():
     '''
     A singleton class designed to be the holder of all user parsed arguments.
@@ -27,15 +26,31 @@ class Options():
 
     def __init__(self, opts=None):
         if not self._initialized and opts:
-            option_msg_list = ["User Inputs:", "-"*20]
+            # set up the global options
+            option_msg_list = ["User Inputs:", "-"*30]
+
             for k, v in opts.items():
+                # find the layouts
                 if isinstance(v, bids.BIDSLayout):
                     self.layouts.append(v)
+                # check for variable regroupings
+                elif k == "group":
+                    option_msg_list.append(f" {k} : {v}")
+                    gmap = dict()
+                    for regroup in v:
+                        group_rename = regroup[-1]
+                        for i in range(len(regroup)-1):
+                            gmap[regroup[i]] = group_rename
+                    setattr(self, k, gmap)
+                    continue
                 else:
                     option_msg_list.append(f" {k} : {v}")
+                # add the option to the class attributes
                 setattr(self, k, v)
-            option_msg_list.append("-"*20)
 
+            option_msg_list.append("-"*30)
+
+            # start the logging subprocess
             log_process, log_queue = config_logging_process(self.log_file, self.log_level, self.log_format)
             setattr(self, 'log_queue', log_queue)
             setattr(self, 'log_process', log_process)

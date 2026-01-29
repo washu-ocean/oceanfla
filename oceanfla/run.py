@@ -16,6 +16,7 @@ def main():
             'execution': {
                 'crashfile_format': "txt",
                 'stop_on_first_crash': True,
+                'crashdump_dir': all_opts.log_dir
             }
         }
     )   
@@ -23,7 +24,7 @@ def main():
     # Build and run the main workflow
     oceanfla_wf = build_oceanfla_wf(
         subjects=all_opts.subject,
-        base_dir=all_opts.work_dir
+        base_dir=all_opts.work
     )
     plugin_args_dict = {'n_procs': all_opts.n_procs, 'memory_gb': all_opts.mem_gb}
 
@@ -35,7 +36,7 @@ def main():
     close_layouts()
     if not all_opts.debug:
         clean_paths([
-            all_opts.work_dir
+            all_opts.work
         ])
     finish_logging()
     

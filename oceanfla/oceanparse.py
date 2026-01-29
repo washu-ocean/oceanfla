@@ -3,7 +3,6 @@ import json
 import sys
 
 
-
 class OceanParser(argparse.ArgumentParser):
 
     def convert_arg_line_to_args(self, arg_line: str) -> list[str]:
@@ -58,8 +57,14 @@ class OceanParser(argparse.ArgumentParser):
                             for k,v in jd.items():
                                 file_arg_strings.append(k)
                                 if isinstance(v, list):
-                                    for val in v:
-                                        file_arg_strings.append(str(val))
+                                    for i, val in enumerate(v):
+                                        if isinstance(val, list):
+                                            if i > 0: 
+                                                file_arg_strings.append(k)
+                                            for sub_val in val:
+                                                file_arg_strings.append(str(sub_val))
+                                        else:
+                                            file_arg_strings.append(str(val))
                                 elif isinstance(v, str):
                                     if not v or not v.strip():
                                         continue

@@ -9,6 +9,7 @@ from datetime import datetime
 
 VERSION = "1.1.4"
 
+logger = logging.getLogger("nipype.utils")
 
 def _build_parser():
 
@@ -326,16 +327,12 @@ def parse_args():
     if callable(args.events_long):
         args.events_long = args.events_long(args)
 
+    breakpoint()
     if args.group:
-        gmap = dict()
         for regroup in args.group:
             if len(regroup) < 3:
                 parser.error(
                     "Each use of the '--group' argument must have a least 3 values")
-            group_rename = regroup[-1]
-            for i in range(len(regroup)-1):
-                gmap[regroup[i]] = group_rename
-        args.group = gmap
 
     # Create label for this execution attempt
     tstamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -346,8 +343,8 @@ def parse_args():
         # args.output_dir.mkdir(exist_ok = True)
 
     # Make the working directory
-    args.work_dir = args.work_dir / execution_label
-    args.work_dir.mkdir(parents=False, exist_ok=False)
+    args.work = args.work_dir / execution_label
+    args.work.mkdir(parents=False, exist_ok=False)
 
     # Add bids layouts for both bids directories
     args.preproc_bids = args.derivs_dir / args.preproc_subfolder
@@ -355,13 +352,13 @@ def parse_args():
         parser.error(
             f"The preprocessed outputs directory does not exist at path: {args.preproc_bids}")
 
-    raw_bids_db_path = args.work_dir / f".raw_indexer"
+    raw_bids_db_path = args.work / f".raw_indexer"
     args.raw_layout = bids.BIDSLayout(root=args.raw_bids,
                                       database_path=raw_bids_db_path,
                                       #   reset_database=True,
                                       validate=False,
                                       indexer=bids.BIDSLayoutIndexer(index_metadata=False))
-    preproc_bids_db_path = args.work_dir / f".preproc_indexer"
+    preproc_bids_db_path = args.work / f".preproc_indexer"
     args.preproc_layout = bids.BIDSLayout(root=args.preproc_bids,
                                           database_path=preproc_bids_db_path,
                                           #   reset_database=True,
@@ -369,7 +366,7 @@ def parse_args():
                                           is_derivative=True,
                                           indexer=bids.BIDSLayoutIndexer(index_metadata=False))
 
-    # Set up the logging
+    # Set up the logging variables
     args.log_dir = args.output_dir / "logs"
     if args.subject and len(args.subject) == 1:
         if (args.preproc_bids / f"sub-{args.subject[0]}").exists():
@@ -378,17 +375,12 @@ def parse_args():
     args.log_file = args.log_dir / f"{execution_label}.log"
     args.log_level = logging.DEBUG if args.debug else logging.INFO
 
-    from oceanfla.config import set_configs, get_logger
+    from oceanfla.config import set_configs
     set_configs(args.__dict__)
-    logger = get_logger("parser")
-    logger.info("hi in parser")
-    # Export the current arguments to a file
     if args.export_args:
-        assert args.export_args.parent.is_dir(
-        ), "Argument export path must be a file path in a directory that exists"
+        if not args.export_args.parent.is_dir():
+            parser.error("Argument export path must be a file path in a directory that exists")
         logger.info(
-            f"####### Exporting Configuration Arguments to: '{args.export_args}' #######\n")
+            f"Exporting Configuration Arguments to: '{args.export_args}'")
         export_args_to_file(args, config_arguments, args.export_args)
 
-    # Change into the log directory
-    os.chdir(args.log_dir)

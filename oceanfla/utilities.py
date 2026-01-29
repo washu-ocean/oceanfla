@@ -9,6 +9,7 @@ import os
 import json
 import logging
 import sys
+from collections.abc import Iterable
 import time
 import stat
 from oceanfla.config import finish_logging
@@ -375,8 +376,8 @@ def export_args_to_file(args,
                 opts_to_save[a.option_strings[0]] = ""
             elif isinstance(all_opts[a.dest], Path):
                 opts_to_save[a.option_strings[0]] = str(all_opts[a.dest].resolve())
-            elif isinstance(all_opts[a.dest], list):
-                opts_to_save[a.option_strings[0]] = [v if isinstance(v, int) or isinstance(v, str) else str(v) for v in all_opts[a.dest]]
+            elif isinstance(all_opts[a.dest], Iterable) and not isinstance(all_opts[a.dest], str):
+                opts_to_save[a.option_strings[0]] = [v if isinstance(v, Iterable) else str(v) for v in all_opts[a.dest]]
             else:
                 opts_to_save[a.option_strings[0]] = all_opts[a.dest]
 
