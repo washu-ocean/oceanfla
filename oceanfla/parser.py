@@ -190,6 +190,10 @@ def _build_parser():
     config_arguments.add_argument("--unmodeled", "-um", nargs="+",
                                   help="""A list of the task regressors to leave unmodeled, but still included in the final design matrix. These are 
                                   typically continuous variables that need not be modeled with hrf or fir, but any of the task regressors can be included.""")
+    
+    config_arguments.add_argument("--parametric_modulators", "-pm", nargs="+",
+                                  help="""A list of the task parameters to include as parametric modulators in the final design matrix. This typically includes 
+                                  task performance and/or environment variables. These parameters must be included in the events file as separate columns.""")
 
     config_arguments.add_argument("--ignore", "-i", nargs="+",
                                   help="A list of task regressors to ignore, and NOT include in your model.")
@@ -327,7 +331,6 @@ def parse_args():
     if callable(args.events_long):
         args.events_long = args.events_long(args)
 
-    breakpoint()
     if args.group:
         for regroup in args.group:
             if len(regroup) < 3:

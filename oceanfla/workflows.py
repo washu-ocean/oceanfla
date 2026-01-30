@@ -503,6 +503,7 @@ def build_run_workflow(run, task: str, file_extension: str):
             fir_vars=all_opts.fir_vars,
             hrf_vars=all_opts.hrf_vars,
             unmodeled=all_opts.unmodeled,
+            parameters=all_opts.parametric_modulators
         ),
         name="events_matrix_node"
     )

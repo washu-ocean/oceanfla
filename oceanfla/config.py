@@ -34,7 +34,7 @@ class Options():
                 if isinstance(v, bids.BIDSLayout):
                     self.layouts.append(v)
                 # check for variable regroupings
-                elif k == "group":
+                elif k == "group" and v:
                     option_msg_list.append(f" {k} : {v}")
                     gmap = dict()
                     for regroup in v:
