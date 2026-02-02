@@ -265,9 +265,9 @@ def make_parametric_modulation_regressors(event_file: str|Path,
     for p in parameters:
         orig_vals = events_df[p].to_numpy()
         demean_vals = orig_vals - np.nanmean(orig_vals)
-        rescaled_vals = demean_vals / np.nanmax(demean_vals)
+        rescaled_vals = demean_vals / np.nanmax(np.abs(demean_vals))
         events_df[p] = rescaled_vals
-    
+
     para_mod_regressors = pd.DataFrame(0, columns=parameters, index=np.arange(0, duration, tr)[:volumes])
     for e in events_df.index:
         i = find_nearest(para_mod_regressors.index, events_df.loc[e, "onset"])
