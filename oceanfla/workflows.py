@@ -4,6 +4,7 @@ from nipype.interfaces.io import BIDSDataGrabber
 from nipype.interfaces.utility import IdentityInterface, Select
 from nipype.interfaces.workbench.cifti import CiftiSmooth
 from niworkflows.utils.bids import collect_participants
+from oceanfla.interfaces.reporting import PlotDesign
 from oceanfla.interfaces.utility import FLADataSink, ReadMetadataFile
 from oceanfla.interfaces.clean import FilterData, PercentChange
 from oceanfla.interfaces.events import EventsMatrix, GetVolumeCount, ModifyEventsFile
@@ -411,6 +412,8 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
             ("bold", "source_file")
         ])
     ])
+
+    # TODO: add Report workflow
 
     return workflow
 
@@ -1127,3 +1130,33 @@ def build_smoothing_wf(run, task: str, file_extension: str):
         ])
 
     return workflow
+
+
+def build_reporting_workflow(tasks):
+    
+    tasks = listify(tasks)
+    workflow = Workflow(name=f"task_{'-'.join(tasks)}_reporting_wf")
+
+    inputnode = Node(
+        IdentityInterface(
+            fields=[
+                "design_matrix",
+            ]
+        ),
+        name="inputnode"
+    )
+
+    outputnode = Node(
+        IdentityInterface(
+            fields=[
+                "design_plot"
+            ]
+        ),
+        name="outputnode"
+    )
+
+    plot_design_node = Node(PlotDesign())
+
+    return workflow
+
+    
