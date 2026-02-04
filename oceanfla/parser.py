@@ -127,11 +127,14 @@ def _build_parser():
     session_arguments.add_argument("--export_args", "-ea", type=ParentExists,
                                    help="Path to a file to save the current arguments.")
 
-    session_arguments.add_argument("--force_overwrite", action="store_true",
-                                   help="Use this flag to force oceanfla to proceed when conflicting task outputs are present in the output directory")
+    # session_arguments.add_argument("--force_overwrite", action="store_true",
+    #                                help="Use this flag to force oceanfla to proceed when conflicting task outputs are present in the output directory")
 
+    session_arguments.add_argument("--keep_work", action="store_true",
+                                   help="Use this flag to prevent the working directory for this run from being deleted")
+    
     session_arguments.add_argument("--debug", action="store_true",
-                                   help="Use this flag to save intermediate outputs for a chance to debug inputs")
+                                   help="Use this flag to recieve DEBUG level logging AND keep the working directory from being deleted")
 
     config_arguments = parser.add_argument_group(
         "Configuration Arguments", "These arguments are saved to a file if the '--export_args' option is used")
@@ -163,7 +166,7 @@ def _build_parser():
     config_arguments.add_argument("--output_dir", "-o", type=ExistingDir,
                                   help="Alternate Path to a directory to store the results of this analysis. Default is '[derivs_dir]/first_level/'")
 
-    config_arguments.add_argument("--work_dir", "-w", type=ExistingDir,
+    config_arguments.add_argument("--work_dir", "-w", type=ExistingDir, required=True,
                                   help="Path to a working directory to store intermediate outputs")
 
     # config_arguments.add_argument("--custom_desc", "-cd",
@@ -338,16 +341,18 @@ def parse_args():
                     "Each use of the '--group' argument must have a least 3 values")
 
     # Create label for this execution attempt
-    tstamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    tstamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     execution_label = f"oceanfla_task-{'-'.join(args.task)}_{tstamp}"
 
     if not hasattr(args, "output_dir") or args.output_dir is None:
         args.output_dir = args.derivs_dir / args.derivs_subfolder
-        # args.output_dir.mkdir(exist_ok = True)
 
     # Make the working directory
-    args.work = args.work_dir / execution_label
-    args.work.mkdir(parents=False, exist_ok=False)
+    if args.work_dir.name.startswith(execution_label.rsplit("_",1)[0]):
+        args.work = args.work_dir
+    else:
+        args.work = args.work_dir / execution_label
+        args.work.mkdir(parents=False, exist_ok=False)
 
     # Add bids layouts for both bids directories
     args.preproc_bids = args.derivs_dir / args.preproc_subfolder
@@ -376,7 +381,11 @@ def parse_args():
             args.log_dir = args.output_dir / f"sub-{args.subject[0]}" / "logs"
     args.log_dir.mkdir(exist_ok=True, parents=True)
     args.log_file = args.log_dir / f"{execution_label}.log"
-    args.log_level = logging.DEBUG if args.debug else logging.INFO
+    args.log_level = logging.INFO
+
+    if args.debug:
+        args.log_level = logging.DEBUG
+        args.keep_work = True
 
     from oceanfla.config import set_configs
     set_configs(args.__dict__)

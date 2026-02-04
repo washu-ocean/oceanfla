@@ -1323,7 +1323,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "matplotlib", specifier = ">=3.9.1,<4.0.0" },
-    { name = "nilearn", specifier = ">=0.10.4,<1.0.0" },
+    { name = "nilearn", specifier = ">=0.11.0,<1.0.0" },
     { name = "nipype", specifier = ">=1.10.0" },
     { name = "niworkflows", specifier = ">=1.14.3" },
     { name = "numpy", specifier = ">=1.26.0" },

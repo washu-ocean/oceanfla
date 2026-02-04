@@ -4,6 +4,7 @@ from nipype.interfaces.io import BIDSDataGrabber
 from nipype.interfaces.utility import IdentityInterface, Select
 from nipype.interfaces.workbench.cifti import CiftiSmooth
 from niworkflows.utils.bids import collect_participants
+from oceanfla.interfaces import reporting
 from oceanfla.interfaces.reporting import PlotDesign
 from oceanfla.interfaces.utility import FLADataSink, ReadMetadataFile
 from oceanfla.interfaces.clean import FilterData, PercentChange
@@ -371,27 +372,6 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
         ])
     ])
 
-    design_matrix_ds = Node(
-        FLADataSink(
-            base_directory=all_opts.derivs_dir,
-            out_path_base=all_opts.derivs_subfolder,
-            extra_bids_patterns=all_opts.bids_patterns,
-            dismiss_entities=["run"],
-            desc="final",
-            suffix="design",
-            task=task_name,
-        ),
-        name=f"{func_space}_design_matrix_ds"
-    )
-    workflow.connect([
-        (regression_wf, design_matrix_ds, [
-            ("outputnode.design_matrix", "in_file"),
-        ]),
-        (derivs_grabber, design_matrix_ds, [
-            ("confounds", "source_file")
-        ])
-    ])
-
     residual_bold_ds = Node(
         FLADataSink(
             base_directory=all_opts.derivs_dir,
@@ -413,7 +393,48 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
         ])
     ])
 
+    design_ds = Node(
+        FLADataSink(
+            base_directory=all_opts.derivs_dir,
+            out_path_base=all_opts.derivs_subfolder,
+            extra_bids_patterns=all_opts.bids_patterns,
+            dismiss_entities=["run"],
+            desc="final",
+            suffix="design",
+            task=task_name,
+        ),
+        name=f"{func_space}_design_ds"
+    )
+    workflow.connect([
+        (derivs_grabber, design_ds, [
+            ("confounds", "source_file")
+        ])
+    ])
+
     # TODO: add Report workflow
+    reporting_wf = build_reporting_workflow(tasks=all_opts.task)
+    workflow.connect([
+        (regression_wf, reporting_wf, [
+            ("outputnode.design_matrix", "inputnode.design_matrix"),
+            ("outputnode.tmask_file", "inputnode.tmask_file"),
+        ]),
+    ])
+
+    design_merging_node = Node(
+        MergeUnique(),
+        name="merge_design_files_node"
+    )
+    workflow.connect([
+        (regression_wf, design_merging_node, [
+            ("outputnode.design_matrix", "design_x1"),
+        ]),
+        (reporting_wf, design_merging_node, [
+            ("outputnode.design_plot", "design_x2"),
+        ]),
+        (design_merging_node, design_ds, [
+            ("design", "in_file")
+        ])
+    ])
 
     return workflow
 
@@ -917,6 +938,7 @@ def build_regression_workflow(tasks, run=None, regression_columns=None):
                 "beta_labels",
                 "bold_file",
                 "design_matrix",
+                "tmask_file",
                 "residual_design_matrix"
             ]
         ),
@@ -959,6 +981,7 @@ def build_regression_workflow(tasks, run=None, regression_columns=None):
         ]),
         (concat_data_node, outputnode, [
             ("design_matrix", "design_matrix"),
+            ("tmask_file", "tmask_file"),
             ("residual_design_matrix", "residual_design_matrix"),
         ]),
         (glm_node, outputnode, [
@@ -1141,6 +1164,7 @@ def build_reporting_workflow(tasks):
         IdentityInterface(
             fields=[
                 "design_matrix",
+                "tmask_file"
             ]
         ),
         name="inputnode"
@@ -1155,7 +1179,20 @@ def build_reporting_workflow(tasks):
         name="outputnode"
     )
 
-    plot_design_node = Node(PlotDesign())
+    plot_design_node = Node(
+        PlotDesign(),
+        name="plot_design_node"
+    )
+
+    workflow.connect([
+        (inputnode, plot_design_node, [
+            ("design_matrix", "design_matrix"),
+            ("tmask_file", "tmask_file")
+        ]),
+        (plot_design_node, outputnode, [
+            ("design_plot", "design_plot")
+        ])
+    ])
 
     return workflow
 

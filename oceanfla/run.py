@@ -34,7 +34,7 @@ def main():
 
     # Some clean-up
     close_layouts()
-    if not all_opts.debug:
+    if not all_opts.keep_work:
         clean_paths([
             all_opts.work
         ])
