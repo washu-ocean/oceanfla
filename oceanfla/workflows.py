@@ -398,9 +398,8 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
             base_directory=all_opts.derivs_dir,
             out_path_base=all_opts.derivs_subfolder,
             extra_bids_patterns=all_opts.bids_patterns,
-            dismiss_entities=["run"],
             desc="final",
-            suffix="design",
+            suffix=["design", "design", "correlations"],
             task=task_name,
         ),
         name=f"{func_space}_design_ds"
@@ -430,6 +429,9 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
         ]),
         (reporting_wf, design_merging_node, [
             ("outputnode.design_plot", "design_x2"),
+        ]),
+        (reporting_wf, design_merging_node, [
+            ("outputnode.design_correlations", "design_x3"),
         ]),
         (design_merging_node, design_ds, [
             ("design", "in_file")
@@ -1173,7 +1175,8 @@ def build_reporting_workflow(tasks):
     outputnode = Node(
         IdentityInterface(
             fields=[
-                "design_plot"
+                "design_plot",
+                "design_correlations"
             ]
         ),
         name="outputnode"
@@ -1190,7 +1193,8 @@ def build_reporting_workflow(tasks):
             ("tmask_file", "tmask_file")
         ]),
         (plot_design_node, outputnode, [
-            ("design_plot", "design_plot")
+            ("design_plot", "design_plot"),
+            ("design_correlations", "design_correlations")
         ])
     ])
 
