@@ -403,3 +403,82 @@ def combine_regression_data(func_list: list,
     res_list.append(residual_design_file)
 
     return res_list
+
+
+class MakeRunDesignInputSpec(BaseInterfaceInputSpec):
+    event_matrix = traits.File(
+        exists=True,
+        desc="An event matrix file"
+    )
+    nuisance_matrix = traits.Union(
+        traits.File(exists=True),
+        None,
+        default_value=None,
+        desc="An nuisance matrix file"
+    )
+    nuisance_regressors = traits.Union(
+        traits.List(trait=traits.Str),
+        None,
+        default_value=None,
+        desc="A list of column names to be used for nuisance regression."
+    )
+
+
+class MakeRunDesignOutputSpec(TraitedSpec):
+    nuisance_design = traits.Union(
+        traits.File(exists=True),
+        None,
+        default_value=None,
+        desc="The run-level design matrix for nuisance regression"
+    )
+    main_design = traits.File(
+        exists=True,
+        desc="The run-level design matrix for main effect regression"
+    )
+
+
+class MakeRunDesign(SimpleInterface):
+    input_spec = MakeRunDesignInputSpec
+    output_spec = MakeRunDesignOutputSpec
+
+    def _run_interface(self, runtime):
+
+        self._results["main_design"], self._results["nuisance_design"] = make_run_design_files(
+            event_matrix=self.inputs.event_matrix,
+            nuisance_matrix=self.inputs.nuisance_matrix,
+            nuisance_regressors=self.inputs.nuisance_regressors
+        )
+        return runtime
+
+
+def make_run_design_files(event_matrix: str,
+                          nuisance_matrix: str = None,
+                          nuisance_regressors: list[str] = None):
+    import pandas as pd
+    import numpy as np
+
+    event_df = pd.read_csv(event_matrix, sep="\t")
+
+    combo_df = None
+    if not nuisance_matrix:
+        if not nuisance_regressors:
+            return event_df, None
+        else:
+            combo_df = event_df
+    else:
+        nuisance_df = pd.read_csv(nuisance_matrix, sep="\t")
+        combo_df = pd.concat([event_df.reset_index(drop=True), 
+                                nuisance_df.reset_index(drop=True)], 
+                              axis=1)
+        if not nuisance_regressors:
+            return combo_df, None
+    
+    all_design_columns = combo_df.columns.to_list()
+    main_regressors = [
+        dc for dc in all_design_columns if dc not in nuisance_regressors]
+    if len(main_regressors) < 1:
+        raise ValueError("All regressor columns are being used for nuisance regression")
+    nuisance_design = combo_df.loc[:, nuisance_regressors]
+    main_design = combo_df.loc[:, main_regressors]
+
+    return main_design, nuisance_design

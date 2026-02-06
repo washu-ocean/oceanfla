@@ -104,7 +104,7 @@ def get_layout_for_file(file) -> bids.BIDSLayout:
 
 
 
-def get_bids_file(file:str):
+def get_bids_file(file):
     '''
     Function to return the corresponding bids.layout.BIDSFile 
     for a given filepath 
@@ -121,6 +121,8 @@ def get_bids_file(file:str):
         The BIDSFile object or None if it is not found
     
     '''
+    if isinstance(file, bids.layout.BIDSFile):
+        return file
     file_layout = get_layout_for_file(file)
     return file_layout.get_file(file)
 

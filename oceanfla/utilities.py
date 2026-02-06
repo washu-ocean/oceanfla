@@ -13,6 +13,7 @@ from collections.abc import Iterable
 import time
 import stat
 from oceanfla.config import finish_logging
+from oceanfla.interfaces.utility import read_metadata_file
 
 logger = logging.getLogger("nipype.utils")
 # from bids.layout.writing import build_path
@@ -26,7 +27,52 @@ cifti_files = [
 
 
 # Grab BOLD files from the preprocessed outputs, and list the runs and file extension for each 'func_space' in the files. 
-def parse_session_bold_files(layout:bids.BIDSLayout, subject:str, session:str, tasks:list[str]):
+# def parse_session_bold_files(layout:bids.BIDSLayout, subject:str, session:str, tasks:list[str], brain_mask=None):
+#     '''
+#     Finds all BOLD files in the given BIDSLayout, with the given filters, and 
+#     returns a dictionary with organization {SPACE : {"runs" : {TASK : list[RUN#]}, "extension" : [FILE-EXTENSION] }} 
+
+#     Parameters
+#     ----------
+#     layout: bids.BIDSLayout
+#         The BIDS layout to query
+
+#     subject: str
+#         The BIDS subject ID to filter on
+    
+#     session: str
+#         The BIDS session ID to filter on
+
+#     tasks: list[str]
+#         A list of BIDS task IDs to filter on
+    
+
+#     Returns
+#     -------
+#     dict[str : dict[str : list] | list]
+#         A dictionary organizing BOLD run numbers by task and functional space
+    
+#     '''
+#     files = layout.get(subject=subject, session=session, task=tasks, suffix="bold", datatype="func", extension=[".nii",".nii.gz",".dtseries.nii"])
+#     space_run_dict = dict()
+#     for f in files:
+#         # get entities
+#         run = f.entities["run"] if "run" in f.entities else PaddedInt('01')
+#         space = f.entities["space"] if "space" in f.entities else "func"
+#         task = f.entities["task"]
+#         if space in space_run_dict:
+#             if task in space_run_dict[space]["runs"]:
+#                 space_run_dict[space]["runs"][task].append(run)
+#             else:
+#                 space_run_dict[space]["runs"][task] = [run]
+#         else:
+#             space_run_dict[space] = {}
+#             space_run_dict[space]["extension"] = f.entities["extension"]
+#             space_run_dict[space]["runs"] = {task:[run]}
+#     return space_run_dict
+
+
+def parse_session_bold_files(layout:bids.BIDSLayout, subject:str, session:str, tasks:list[str], brain_mask=None):
     '''
     Finds all BOLD files in the given BIDSLayout, with the given filters, and 
     returns a dictionary with organization {SPACE : {"runs" : {TASK : list[RUN#]}, "extension" : [FILE-EXTENSION] }} 
@@ -55,18 +101,17 @@ def parse_session_bold_files(layout:bids.BIDSLayout, subject:str, session:str, t
     files = layout.get(subject=subject, session=session, task=tasks, suffix="bold", datatype="func", extension=[".nii",".nii.gz",".dtseries.nii"])
     space_run_dict = dict()
     for f in files:
-        run = f.entities["run"] if "run" in f.entities else PaddedInt('01')
+        # get entities
+        # run = f.entities["run"] if "run" in f.entities else PaddedInt('01')
         space = f.entities["space"] if "space" in f.entities else "func"
         task = f.entities["task"]
         if space in space_run_dict:
             if task in space_run_dict[space]["runs"]:
-                space_run_dict[space]["runs"][task].append(run)
+                space_run_dict[space][task].append(f.filename)
             else:
-                space_run_dict[space]["runs"][task] = [run]
+                space_run_dict[space][task] = [f.filename]
         else:
-            space_run_dict[space] = {}
-            space_run_dict[space]["extension"] = f.entities["extension"]
-            space_run_dict[space]["runs"] = {task:[run]}
+            space_run_dict[space] = {task:[f.filename]}
     return space_run_dict
 
 

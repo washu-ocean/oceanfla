@@ -79,7 +79,5 @@ def plot_design_matrix(design_matrix, tmask_file=None):
                                    output_file=design_corr_file, 
                                    title="Condition Correlations")
 
-
-    
     # fig.savefig(design_plot_file, bbox_inches="tight")
     return design_plot_file, design_corr_file

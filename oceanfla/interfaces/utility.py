@@ -16,6 +16,10 @@ class MergeUnique(IOBase):
     output_spec = DynamicTraitedSpec
     _sep = "_x"
 
+    def __init__(self, collapse_none=True, **inputs):
+        super().__init__(**inputs)
+        self._collapse_none = collapse_none
+
     # def _run_interface(self, runtime):
     def _list_outputs(self):
         outputs = self._outputs().get()
@@ -43,27 +47,28 @@ class MergeUnique(IOBase):
                 lists = [listify(val) if val is not None else [None]
                          for val in values]
                 out = [[val[i] for val in lists] for i in range(len(lists[0]))]
-            if all([o is None for o in out]):
+
+            if all([o is None for o in out]) and self._collapse_none:
                 out = None
             outputs[input_key] = out
         return outputs
 
 
-class ExtractDataGroupInputSpec(BaseInterfaceInputSpec):
-    bold_list = traits.List(
-        trait=traits.File(exists=True),
-        desc="list of bold files"
-    )
+class ExtractDataGroupInputSpec(DynamicTraitedSpec, BaseInterfaceInputSpec):
+    # bold_list = traits.List(
+    #     trait=traits.File(exists=True),
+    #     desc="list of bold files"
+    # )
 
-    confounds_list = traits.List(
-        trait=traits.File(exists=True),
-        desc="list of confounds files"
-    )
+    # confounds_list = traits.List(
+    #     trait=traits.File(exists=True),
+    #     desc="list of confounds files"
+    # )
 
-    events_list = traits.List(
-        trait=traits.File(exists=True),
-        desc="list of event files"
-    )
+    # events_list = traits.List(
+    #     trait=traits.File(exists=True),
+    #     desc="list of event files"
+    # )
 
     task = traits.Str(desc="The task name of the data")
 
@@ -87,26 +92,42 @@ class ExtractDataGroupOutputSpec(TraitedSpec):
     )
 
 
-class ExtractDataGroup(SimpleInterface):
+# class ExtractDataGroup(SimpleInterface):
+#     input_spec = ExtractDataGroupInputSpec
+#     output_spec = DynamicTraitedSpec
+
+#     def _run_interface(self, runtime):
+
+#         bold_file, confounds_file, events_file = extract_task_run_group(
+#             bold_list=self.inputs.bold_list,
+#             confounds_list=self.inputs.confounds_list,
+#             events_list=self.inputs.events_list,
+#             task_needed=self.inputs.task,
+#             run_needed=self.inputs.run,
+
+#         )
+
+#         self._results["bold_file"] = bold_file
+#         self._results["confounds_file"] = confounds_file
+#         self._results["events_file"] = events_file
+
+#         return runtime
+    
+class ExtractDataGroup(IOBase):
     input_spec = ExtractDataGroupInputSpec
-    output_spec = ExtractDataGroupOutputSpec
+    output_spec = DynamicTraitedSpec
 
-    def _run_interface(self, runtime):
-
-        bold_file, confounds_file, events_file = extract_task_run_group(
-            bold_list=self.inputs.bold_list,
-            confounds_list=self.inputs.confounds_list,
-            events_list=self.inputs.events_list,
-            task_needed=self.inputs.task,
-            run_needed=self.inputs.run,
-
-        )
-
-        self._results["bold_file"] = bold_file
-        self._results["confounds_file"] = confounds_file
-        self._results["events_file"] = events_file
-
-        return runtime
+    def _list_outputs(self):
+        outputs = self._outputs().get()
+        for input_name in self.inputs.get().keys():
+            if input_name in ["task", "run"]:
+                continue
+            outputs[input_name] = extract_task_run_file(
+                bids_list=getattr(self.inputs, input_name),
+                task_needed=self.inputs.task,
+                run_needed=self.inputs.run
+            )
+        return outputs
 
 
 def extract_task_run_group(bold_list: list,
@@ -133,6 +154,21 @@ def extract_task_run_group(bold_list: list,
             f"Could not find all the needed files for run-{run_needed}")
 
     return run_dict["bold"], run_dict["confounds"], run_dict["events"]
+
+
+def extract_task_run_file(bids_list: list,
+                           task_needed: str,
+                           run_needed: int):
+    from bids.layout import parse_file_entities
+
+    for file in bids_list:
+        bids_file_entities = parse_file_entities(file)
+        run = int(bids_file_entities.get("run", 1))
+        if run == int(run_needed) and bids_file_entities["task"] == task_needed:
+            return file
+
+    raise RuntimeError(
+        f"Could not find a file with entities task-{task_needed}, run-{run_needed}")
 
 
 class FLADataSink(DerivativesDataSink):
@@ -170,24 +206,38 @@ class ReadMetadataFile(SimpleInterface):
         return base
 
     def _run_interface(self, runtime):
-        from oceanfla.utilities import replace_entity
-        from pathlib import Path
-        import json
 
-        metadata_dict = {}
-        metadata_path = Path(replace_entity(self.inputs.bids_file, "ext", ".json"))
+        metadata_results = read_metadata_file(
+            data_file=self.inputs.bids_file,
+            requested_fields=self._fields,
+            strict=self._error_on_missing
+        )
+        self._results.update(metadata_results)
 
-        if metadata_path.exists():
-            with open(metadata_path, "r") as metaf:
-                metadata_dict = json.load(metaf)
-            
-            for fname in self._fields:
-                if self._error_on_missing and fname not in metadata_dict:
-                    raise KeyError(
-                        f'Metadata field "{fname}" not found for file {self.inputs.in_file}'
-                    )
-                self._results[fname] = metadata_dict.get(fname, traits.Undefined)
-
-        self._results["metadata_dict"] = metadata_dict
         return runtime
         
+
+def read_metadata_file(data_file: str,
+                       requested_fields: list[str],
+                       strict: bool = True):
+    from oceanfla.utilities import replace_entity
+    from pathlib import Path
+    import json
+
+    res_dict = {}
+    metadata_dict = {}
+    metadata_path = Path(replace_entity(data_file, "ext", ".json"))
+
+    if metadata_path.exists():
+        with open(metadata_path, "r") as metaf:
+            metadata_dict = json.load(metaf)
+        
+        for fname in requested_fields:
+            if strict and fname not in metadata_dict:
+                raise KeyError(
+                    f'Metadata field "{fname}" not found for file {data_file}'
+                )
+            res_dict[fname] = metadata_dict.get(fname, traits.Undefined)
+
+    res_dict["metadata_dict"] = metadata_dict
+    return res_dict

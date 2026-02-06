@@ -37,15 +37,15 @@ class _GenerateNuisanceMatrixInputSpec(BaseInterfaceInputSpec):
 
 
 class _GenerateNuisanceMatrixOutputSpec(TraitedSpec):
-    nuisance_matrix = File(
-        exists=True,
+    nuisance_matrix = traits.Union(
+        File(exists=True),
         desc="Outputted nuisance matrix as a file."
     )
 
 
 class GenerateNuisanceMatrix(SimpleInterface):
     """
-    Generates a nuisance matrix for regression before final GLM.
+    Generates a nuisance matrix for selecting confounding regressors.
     """
 
     input_spec = _GenerateNuisanceMatrixInputSpec
@@ -64,9 +64,6 @@ class GenerateNuisanceMatrix(SimpleInterface):
         )
         return runtime
 
-    # def _list_outputs(self):
-    #     return {'nuisance_matrix': self.inputs.out_file}
-
 
 def generate_nuisance_matrix(confounds_file: str,
                              confounds_columns: list,
@@ -79,28 +76,32 @@ def generate_nuisance_matrix(confounds_file: str,
     import pandas as pd
     import numpy as np
     
-    confounds_columns = set(confounds_columns)
+    # if (confounds_columns is None) 
+
+    select_columns = set(confounds_columns)
     if spike_threshold:
-        confounds_columns.add("framewise_displacement")
+        select_columns.add("framewise_displacement")
     if volterra_columns:
-        confounds_columns.update(volterra_columns)
+        select_columns.update(volterra_columns)
     suffix = "." + confounds_file.split(".")[-1]
     if suffix == ".csv":
-        nuisance = pd.read_csv(confounds_file).loc[:,list(confounds_columns)]
+        nuisance = pd.read_csv(confounds_file).loc[:,list(select_columns)]
     elif suffix == ".tsv":
-        nuisance = pd.read_csv(confounds_file, sep='\t').loc[:,list(confounds_columns)]
+        nuisance = pd.read_csv(confounds_file, sep='\t').loc[:,list(select_columns)]
     else:
         raise ValueError("Invalid suffix (must be .csv or .tsv)")
-    if "framewise_displacement" in confounds_columns:
+    if "framewise_displacement" in select_columns:
         nuisance.loc[0, "framewise_displacement"] = 0
-        if spike_threshold:
-            b = 0
-            for a in range(len(nuisance)):
-                if nuisance.loc[a, "framewise_displacement"] > spike_threshold:
-                    spike_col = make_regressor_run_specific(f"spike{b}", bids_source_file=confounds_file)
-                    nuisance[spike_col] = 0
-                    nuisance.loc[a, spike_col] = 1
-                    b += 1
+    if spike_threshold:
+        b = 0
+        for a in range(len(nuisance)):
+            if nuisance.loc[a, "framewise_displacement"] > spike_threshold:
+                spike_col = make_regressor_run_specific(f"spike{b}", bids_source_file=confounds_file)
+                nuisance[spike_col] = 0
+                nuisance.loc[a, spike_col] = 1
+                b += 1
+    if "framewise_displacement" not in confounds_columns:
+        nuisance.drop(columns="framewise_displacement", inplace=True)
     if demean:
         nuisance[make_regressor_run_specific("mean", bids_source_file=confounds_file)] = 1
     if linear_trend:
