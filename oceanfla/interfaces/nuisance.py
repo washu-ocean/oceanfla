@@ -76,7 +76,7 @@ def generate_nuisance_matrix(confounds_file: str,
     import pandas as pd
     import numpy as np
     
-    # if (confounds_columns is None) 
+    # if (confounds_columns is None) 5
 
     select_columns = set(confounds_columns)
     if spike_threshold:
@@ -90,8 +90,8 @@ def generate_nuisance_matrix(confounds_file: str,
         nuisance = pd.read_csv(confounds_file, sep='\t').loc[:,list(select_columns)]
     else:
         raise ValueError("Invalid suffix (must be .csv or .tsv)")
-    if "framewise_displacement" in select_columns:
-        nuisance.loc[0, "framewise_displacement"] = 0
+    # if "framewise_displacement" in select_columns:
+    #     nuisance.loc[0, "framewise_displacement"] = 0
     if spike_threshold:
         b = 0
         for a in range(len(nuisance)):

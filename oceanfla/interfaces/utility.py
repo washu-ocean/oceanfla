@@ -34,7 +34,7 @@ class MergeUnique(IOBase):
         for input_key in input_key_name_set:
             out = []
             values = [getattr(self.inputs, f"{input_key}{self._sep}{idx}")
-                      for idx in range(1, max_index + 1)
+                      for idx in range(0, max_index + 1)
                       if hasattr(self.inputs,  f"{input_key}{self._sep}{idx}")]
             if self.inputs.axis == "vstack":
                 for value in values:
@@ -122,45 +122,48 @@ class ExtractDataGroup(IOBase):
         for input_name in self.inputs.get().keys():
             if input_name in ["task", "run"]:
                 continue
-            outputs[input_name] = extract_task_run_file(
-                bids_list=getattr(self.inputs, input_name),
-                task_needed=self.inputs.task,
-                run_needed=self.inputs.run
-            )
+            if getattr(self.inputs, input_name) is None:
+                outputs[input_name] = None
+            else:
+                outputs[input_name] = extract_task_run_file(
+                    bids_list=getattr(self.inputs, input_name),
+                    task_needed=self.inputs.task,
+                    run_needed=self.inputs.run
+                )
         return outputs
 
 
-def extract_task_run_group(bold_list: list,
-                           confounds_list: list,
-                           events_list: list,
-                           task_needed: str,
-                           run_needed: int):
-    from oceanfla.config import get_bids_file
-    run_dict = {
-        "bold": None,
-        "confounds": None,
-        "events": None
-    }
-    for ftype, file_list in {"bold": bold_list, "confounds": confounds_list, "events": events_list}.items():
-        for file in file_list:
-            bids_file = get_bids_file(file)
-            run = int(bids_file.entities.get("run", 1))
-            if run == int(run_needed) and bids_file.entities["task"] == task_needed:
-                run_dict[ftype] = bids_file
-                break
+# def extract_task_run_group(bold_list: list,
+#                            confounds_list: list,
+#                            events_list: list,
+#                            task_needed: str,
+#                            run_needed: int):
+#     from oceanfla.config import get_bids_file
+#     run_dict = {
+#         "bold": None,
+#         "confounds": None,
+#         "events": None
+#     }
+#     for ftype, file_list in {"bold": bold_list, "confounds": confounds_list, "events": events_list}.items():
+#         for file in file_list:
+#             bids_file = get_bids_file(file)
+#             run = int(bids_file.entities.get("run", 1))
+#             if run == int(run_needed) and bids_file.entities["task"] == task_needed:
+#                 run_dict[ftype] = bids_file
+#                 break
 
-    if not all(list(run_dict.values())):
-        raise RuntimeError(
-            f"Could not find all the needed files for run-{run_needed}")
+#     if not all(list(run_dict.values())):
+#         raise RuntimeError(
+#             f"Could not find all the needed files for run-{run_needed}")
 
-    return run_dict["bold"], run_dict["confounds"], run_dict["events"]
+#     return run_dict["bold"], run_dict["confounds"], run_dict["events"]
 
 
 def extract_task_run_file(bids_list: list,
                            task_needed: str,
                            run_needed: int):
     from bids.layout import parse_file_entities
-
+    
     for file in bids_list:
         bids_file_entities = parse_file_entities(file)
         run = int(bids_file_entities.get("run", 1))
