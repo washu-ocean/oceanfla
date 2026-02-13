@@ -90,6 +90,7 @@ class ConcatRegressionDataInputSpec(OptionalInterfaceSpec):
     )
     tmask_files_in = event_matrices = traits.Union(
         traits.List(),
+        None,
         traits.File(exists=True),
         desc="A list of temporal mask files "
     )

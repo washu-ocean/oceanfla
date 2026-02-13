@@ -6,12 +6,10 @@ from nipype.interfaces.base import (
     TraitedSpec,
     DynamicTraitedSpec,
     traits,
-    InputMultiObject,
     CommandLine
 )
 from bids.utils import listify
-from traitlets import default
-from niworkflows.interfaces.bids import DerivativesDataSink, ReadSidecarJSON, _DerivativesDataSinkInputSpec
+from niworkflows.interfaces.bids import DerivativesDataSink, _DerivativesDataSinkInputSpec
 from nipype.interfaces.base.support import RuntimeContext, InterfaceResult
 from nipype import config
 from nipype.utils.filemanip import indirectory

@@ -4,19 +4,14 @@ import nibabel as nib
 import nilearn.masking as nmask
 import numpy as np
 import bids
-# from bids.layout.utils import PaddedInt
 import os
 import json
 import logging
 import sys
 from collections.abc import Iterable
-# import time
-# import stat
-from oceanfla.config import finish_logging
-from oceanfla.interfaces.utility import read_metadata_file
+from oceanfla.config import finish_logging, get_logger
 
 logger = logging.getLogger("nipype.utils")
-# from bids.layout.writing import build_path
 
 cifti_files = [
     ".dtseries.nii",
@@ -420,7 +415,7 @@ def prompt_user_continue(msg:str) -> bool:
     return ans
 
 
-def clean_paths(path_list:list):
+def clean_paths(path_list):
     all_good = True
     for p in path_list:
         path = Path(p)

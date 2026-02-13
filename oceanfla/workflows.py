@@ -407,8 +407,8 @@ def build_ses_design_wf(run, task):
     ### Save these run-level files out if requested ###
     if all_opts.save_intermediates:
         event_matrix_ds = Node(FLADataSink(
-            base_directory=all_opts.derivs_dir,
-            out_path_base=all_opts.derivs_subfolder,
+            base_directory=all_opts.datasink_path.parent,
+            out_path_base=all_opts.datasink_path.name,
             extra_bids_patterns=all_opts.bids_patterns,
             desc="modeled",
             suffix="events"
@@ -426,8 +426,8 @@ def build_ses_design_wf(run, task):
 
         if nuisance_regressors:
             nuisance_design_ds = Node(FLADataSink(
-                base_directory=all_opts.derivs_dir,
-                out_path_base=all_opts.derivs_subfolder,
+                base_directory=all_opts.datasink_path.parent,
+                out_path_base=all_opts.datasink_path.name,
                 extra_bids_patterns=all_opts.bids_patterns,
                 desc="nuisance",
                 suffix="design"
@@ -449,8 +449,8 @@ def build_ses_design_wf(run, task):
         )
         make_tmask_tsv_node.inputs.fd_threshold = all_opts.fd_threshold
         tmask_ds = Node(FLADataSink(
-            base_directory=all_opts.derivs_dir,
-            out_path_base=all_opts.derivs_subfolder,
+            base_directory=all_opts.datasink_path.parent,
+            out_path_base=all_opts.datasink_path.name,
             extra_bids_patterns=all_opts.bids_patterns,
             suffix="tmask"
         ),
@@ -665,8 +665,8 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
     need_compress = file_extension.endswith(".gz")
     beta_weights_ds = Node(
         FLADataSink(
-            base_directory=all_opts.derivs_dir,
-            out_path_base=all_opts.derivs_subfolder,
+            base_directory=all_opts.datasink_path.parent,
+            out_path_base=all_opts.datasink_path.name,
             compress=need_compress,
             extra_bids_patterns=all_opts.bids_patterns,
             dismiss_entities=["desc", "run", "den"],
@@ -688,8 +688,8 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
 
     residual_bold_ds = Node(
         FLADataSink(
-            base_directory=all_opts.derivs_dir,
-            out_path_base=all_opts.derivs_subfolder,
+            base_directory=all_opts.datasink_path.parent,
+            out_path_base=all_opts.datasink_path.name,
             extra_bids_patterns=all_opts.bids_patterns,
             compress=need_compress,
             dismiss_entities=["run", "den"],
@@ -708,8 +708,8 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
 
     design_ds = Node(
         FLADataSink(
-            base_directory=all_opts.derivs_dir,
-            out_path_base=all_opts.derivs_subfolder,
+            base_directory=all_opts.datasink_path.parent,
+            out_path_base=all_opts.datasink_path.name,
             extra_bids_patterns=all_opts.bids_patterns,
             dismiss_entities=["run", "den"],
             desc="final",
@@ -722,8 +722,8 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
     )
     design_corr_ds = Node(
         FLADataSink(
-            base_directory=all_opts.derivs_dir,
-            out_path_base=all_opts.derivs_subfolder,
+            base_directory=all_opts.datasink_path.parent,
+            out_path_base=all_opts.datasink_path.name,
             extra_bids_patterns=all_opts.bids_patterns,
             dismiss_entities=["run", "den"],
             desc="final",
@@ -828,8 +828,8 @@ def build_run_workflow(run, task: str, file_extension: str):
 
         if all_opts.save_intermediates:
             smoothed_ds = Node(FLADataSink(
-                base_directory=all_opts.derivs_dir,
-                out_path_base=all_opts.derivs_subfolder,
+                base_directory=all_opts.datasink_path.parent,
+                out_path_base=all_opts.datasink_path.name,
                 extra_bids_patterns=all_opts.bids_patterns,
                 compress=compress_files,
                 dismiss_entities=["den"],
@@ -871,8 +871,8 @@ def build_run_workflow(run, task: str, file_extension: str):
         last_func_node = percent_change_node
         if all_opts.save_intermediates:
             percent_change_ds = Node(FLADataSink(
-                base_directory=all_opts.derivs_dir,
-                out_path_base=all_opts.derivs_subfolder,
+                base_directory=all_opts.datasink_path.parent,
+                out_path_base=all_opts.datasink_path.name,
                 extra_bids_patterns=all_opts.bids_patterns,
                 compress=compress_files,
                 dismiss_entities=["den"],
@@ -913,8 +913,8 @@ def build_run_workflow(run, task: str, file_extension: str):
 
         if all_opts.save_intermediates:
             regressed_bold_ds = Node(FLADataSink(
-                base_directory=all_opts.derivs_dir,
-                out_path_base=all_opts.derivs_subfolder,
+                base_directory=all_opts.datasink_path.parent,
+                out_path_base=all_opts.datasink_path.name,
                 extra_bids_patterns=all_opts.bids_patterns,
                 compress=compress_files,
                 dismiss_entities=["den"],
@@ -933,8 +933,8 @@ def build_run_workflow(run, task: str, file_extension: str):
             ])
 
             nuisance_betas_ds = Node(FLADataSink(
-                base_directory=all_opts.derivs_dir,
-                out_path_base=all_opts.derivs_subfolder,
+                base_directory=all_opts.datasink_path.parent,
+                out_path_base=all_opts.datasink_path.name,
                 extra_bids_patterns=all_opts.bids_patterns,
                 compress=compress_files,
                 dismiss_entities=["den"],
@@ -1002,8 +1002,8 @@ def build_run_workflow(run, task: str, file_extension: str):
 
         if all_opts.save_intermediates:
             filter_ds = Node(FLADataSink(
-                base_directory=all_opts.derivs_dir,
-                out_path_base=all_opts.derivs_subfolder,
+                base_directory=all_opts.datasink_path.parent,
+                out_path_base=all_opts.datasink_path.name,
                 extra_bids_patterns=all_opts.bids_patterns,
                 compress=compress_files,
                 allowed_entites=("hp", "lp"),

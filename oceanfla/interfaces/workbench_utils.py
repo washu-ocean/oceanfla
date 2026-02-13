@@ -31,7 +31,7 @@ class VolumeSmoothInputSpec(OptionalInterfaceSpec, CommandLineInputSpec):
     )
     volume_out = File(
         hash_files=False,
-        name_source=["in_file"],
+        name_source=["volume_in"],
         name_template="smoothed_%s.nii",
         keep_extension=True,
         argstr="%s",
@@ -58,7 +58,7 @@ class VolumeSmoothInputSpec(OptionalInterfaceSpec, CommandLineInputSpec):
 class VolumeSmoothOutputSpec(OptionalInterfaceSpec):
     volume_out = File(exists=True, desc="output NIFTI file")
 
-class VolumeSmooth(OptionalInterface, WBCommand):
+class VolumeSmooth(OptionalCommandLineInterface, WBCommand):
     input_spec = VolumeSmoothInputSpec
     output_spec = VolumeSmoothOutputSpec
 

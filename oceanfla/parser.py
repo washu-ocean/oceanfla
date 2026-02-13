@@ -347,17 +347,19 @@ def parse_args():
     execution_label = f"oceanfla_task-{args.combined_task_name}_{tstamp}"
 
     if not hasattr(args, "output_dir") or args.output_dir is None:
-        args.output_dir = args.derivs_dir / args.derivs_subfolder
+        args.datasink_path = args.derivs_dir / args.derivs_subfolder
+    else:
+        args.datasink_path = args.output_dir
 
     # Check if old outputs exist
-    old_outputs, remove_old_outputs = [], False
+    old_outputs, remove_old_outputs = set(), False
     ses_label = f"ses-{args.session}_" if args.session else ''
     for task in args.task + [args.combined_task_name]:
         if args.subject:
             for sub in args.subject:
-                old_outputs.extend(args.output_dir.glob(f"sub-{sub}/**/func/sub-{sub}_{ses_label}*task-{task}_*"))
+                old_outputs.update(args.datasink_path.glob(f"sub-{sub}/**/func/sub-{sub}_{ses_label}*task-{task}_*"))
         else:
-            old_outputs.extend(args.output_dir.glob(f"**/func/sub-*_{ses_label}*task-{task}_*"))
+            old_outputs.update(args.datasink_path.glob(f"**/func/sub-*_{ses_label}*task-{task}_*"))
     if len(old_outputs) > 1 and not args.force_overwrite:
         from oceanfla.utilities import prompt_user_continue
         remove_old_outputs = prompt_user_continue(dedent(f"""
@@ -395,11 +397,11 @@ def parse_args():
                                           indexer=bids.BIDSLayoutIndexer(index_metadata=False))
 
     # Set up the logging variables
-    args.log_dir = args.output_dir / "logs"
+    args.log_dir = args.datasink_path / "logs"
     args.log_file = args.log_dir / f"{execution_label}.log"
     if args.subject and len(args.subject) == 1:
         if (args.preproc_bids / f"sub-{args.subject[0]}").exists():
-            args.log_dir = args.output_dir / f"sub-{args.subject[0]}" / "logs"
+            args.log_dir = args.datasink_path / f"sub-{args.subject[0]}" / "logs"
             args.log_file = args.log_dir / f"sub-{args.subject[0]}_{ses_label}{execution_label}.log"
     args.log_dir.mkdir(exist_ok=True, parents=True)
     
@@ -409,6 +411,8 @@ def parse_args():
         args.keep_work = True
         args.save_intermediates = True
 
+    
+    # Make the options global
     from oceanfla.config import set_configs
     set_configs(args.__dict__)
 
