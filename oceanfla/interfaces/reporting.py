@@ -5,11 +5,15 @@ from nipype.interfaces.base import (
     TraitedSpec,
     traits,
 )
+from oceanfla.interfaces.utility import (
+    OptionalInterface,
+    OptionalInterfaceSpec
+)
 
-class PlotDesignInputSpec(BaseInterfaceInputSpec):
-    design_matrix = traits.File(
-        exists=True,
-        mandatory=True,
+class PlotDesignInputSpec(OptionalInterfaceSpec):
+    design_matrix = traits.Union(
+        traits.File(exists=True),
+        None,
         desc="The design matrix to plot"
     )
     tmask_file = traits.Union(
@@ -18,7 +22,7 @@ class PlotDesignInputSpec(BaseInterfaceInputSpec):
         desc="The temporal mask file",
     )
 
-class PlotDesignOutputSpec(TraitedSpec):
+class PlotDesignOutputSpec(OptionalInterfaceSpec):
     design_plot = traits.File(
         exists=True,
         desc="A saved png plot of the design matrix"
@@ -28,7 +32,7 @@ class PlotDesignOutputSpec(TraitedSpec):
         desc="A saved png plot of condition correlations"
     )
 
-class PlotDesign(SimpleInterface):
+class PlotDesign(OptionalInterface):
     input_spec = PlotDesignInputSpec
     output_spec = PlotDesignOutputSpec
 
@@ -45,10 +49,8 @@ def plot_design_matrix(design_matrix, tmask_file=None):
     import pandas as pd
     import numpy as np
     import matplotlib.pyplot as plt
-    # from matplotlib.gridspec import GridSpec
     from nilearn.plotting import plot_design_matrix, plot_design_matrix_correlation
 
-    # plt.rcParams['font.size'] = 24
 
     design_df = pd.read_csv(design_matrix, sep="\t")
     mask = np.loadtxt(tmask_file).astype(bool) if tmask_file else np.full(
@@ -60,8 +62,6 @@ def plot_design_matrix(design_matrix, tmask_file=None):
 
     dmat_grid_rows = num_rows//10
     fig_width, fig_height = num_conditions, (dmat_grid_rows+ num_conditions)
-    # fig = plt.figure(figsize=(fig_width, fig_height))
-    # gs = GridSpec(nrows=(dmat_grid_rows + num_conditions), ncols=num_conditions, figure=fig)
     
     design_plot_file = replace_entities(
         file=design_matrix,

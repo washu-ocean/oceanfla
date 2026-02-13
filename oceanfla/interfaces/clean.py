@@ -6,8 +6,12 @@ from nipype.interfaces.base import (
     TraitedSpec,
     traits,
 )
+from oceanfla.interfaces.utility import ( 
+    OptionalInterface, 
+    OptionalInterfaceSpec,
+)
 
-class _FilterDataInputSpec(BaseInterfaceInputSpec):
+class _FilterDataInputSpec(OptionalInterfaceSpec):
     bold_in = File(
         exists=True, mandatory=True,
         desc="Path to unfiltered timeseries (as a .nii, .nii.gz, or .dtseries.nii)."
@@ -43,14 +47,14 @@ class _FilterDataInputSpec(BaseInterfaceInputSpec):
     )
 
 
-class _FilterDataOutputSpec(TraitedSpec):
-    bold_file = OutputMultiObject(
-        File(exists=True),
+class _FilterDataOutputSpec(OptionalInterfaceSpec):
+    bold_file = File(
+        exists=True,
         desc="Filtered timeseries."
     )
 
 
-class FilterData(SimpleInterface):
+class FilterData(OptionalInterface):
     """
     Generates a nuisance matrix for regression before final GLM.
     """
@@ -75,7 +79,7 @@ class FilterData(SimpleInterface):
 
 
 
-class PercentChangeInputSpec(BaseInterfaceInputSpec):
+class PercentChangeInputSpec(OptionalInterfaceSpec):
     bold_in = File(exists=True, mandatory=True,
                    desc="A BIDS style bold file")
 
@@ -92,12 +96,12 @@ class PercentChangeInputSpec(BaseInterfaceInputSpec):
     )
 
 
-class PercentChangeOutputSpec(TraitedSpec):
+class PercentChangeOutputSpec(OptionalInterfaceSpec):
     bold_file = File(exists=True,
                      desc="The functional data after a percent signal change transformation")
 
 
-class PercentChange(SimpleInterface):
+class PercentChange(OptionalInterface):
     input_spec = PercentChangeInputSpec
     output_spec = PercentChangeOutputSpec
 

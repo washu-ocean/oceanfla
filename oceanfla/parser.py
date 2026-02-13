@@ -1,6 +1,7 @@
 import argparse
 from pathlib import Path
 import os
+from textwrap import dedent
 from oceanfla.oceanparse import OceanParser
 from oceanfla.utilities import export_args_to_file
 import logging
@@ -127,8 +128,8 @@ def _build_parser():
     session_arguments.add_argument("--export_args", "-ea", type=ParentExists,
                                    help="Path to a file to save the current arguments.")
 
-    # session_arguments.add_argument("--force_overwrite", action="store_true",
-    #                                help="Use this flag to force oceanfla to proceed when conflicting task outputs are present in the output directory")
+    session_arguments.add_argument("--force_overwrite", action="store_true",
+                                   help="Use this flag to force oceanfla to proceed when conflicting task outputs are present in the output directory")
 
     session_arguments.add_argument("--keep_work", action="store_true",
                                    help="Use this flag to prevent the working directory for this run from being deleted")
@@ -140,7 +141,7 @@ def _build_parser():
         "Configuration Arguments", "These arguments are saved to a file if the '--export_args' option is used")
 
     config_arguments.add_argument("--task", "-t", nargs="+", required=True,
-                                  help="The name of the task to analyze.")
+                                  help="The name of the task(s) to analyze.")
 
     config_arguments.add_argument("--brain_mask", "-bm", type=ExistingFile,
                                   help="If the bold file type is volumetric data, a brain mask must also be supplied.")
@@ -168,9 +169,9 @@ def _build_parser():
 
     config_arguments.add_argument("--work_dir", "-w", type=ExistingDir, required=True,
                                   help="Path to a working directory to store intermediate outputs")
-
-    # config_arguments.add_argument("--custom_desc", "-cd",
-    #                               help="A custom description to add in the file name of every output file.")
+    
+    config_arguments.add_argument("--save_intermediates", "-si", action="store_true",
+                                  help="Flag to indicate that intermediate files, created during processing, should be saved to the output directory.")
 
     config_arguments.add_argument("--fir", "-ff", type=AboveZeroInt,
                                   help="The number of frames to use in an FIR model.")
@@ -283,16 +284,16 @@ def _build_parser():
     config_arguments.add_argument("--volterra_columns", "-vc", nargs="+", default=[],
                                   help="The confound columns to include in the expansion. Must be specifed with the '--volterra_lag' option.")
 
-    config_arguments.add_argument("--parcellate", "-parc", type=ExistingFile,
-                                  help="Path to a dlabel file to use for parcellation of a dtseries")
+    # config_arguments.add_argument("--parcellate", "-parc", type=ExistingFile,
+    #                               help="Path to a dlabel file to use for parcellation of a dtseries")
 
     config_arguments.add_argument("--stdscale_glm", choices=["runlevel", "seslevel", "both", "none"], default="seslevel",
-                                  help="Option to standard scale concatenated timeseries before running final GLM (after masking & nuisance regression)")
+                                  help="When/if to standard scale the regression data before regression. seslevel is applied at the main effect regression, runlevel is applied a nuisance regression. (Default is seslevel)")
 
     config_arguments.add_argument("--n_procs", type=PositiveInt, default=4,
                                   help="The number of CPUs to use for execution")
 
-    config_arguments.add_argument("--mem_gb", type=PositiveFloat, default=10,
+    config_arguments.add_argument("--mem_gb", type=PositiveFloat, default=5,
                                   help="The amount of memory to use in GB for execution")
 
     return (parser, config_arguments)
@@ -319,10 +320,10 @@ def parse_args():
             parser.error(
                 "The 'custom_hrf' argument must be a file of type '.txt' and must exist")
 
-    if args.parcellate:
-        if (not args.parcellate.exists()) or (not args.parcellate.name.endswith(".dlabel.nii")):
-            parser.error(
-                "The 'parcellate' argument must be a file of type '.dlabel.nii' and must exist")
+    # if args.parcellate:
+    #     if (not args.parcellate.exists()) or (not args.parcellate.name.endswith(".dlabel.nii")):
+    #         parser.error(
+    #             "The 'parcellate' argument must be a file of type '.dlabel.nii' and must exist")
 
     # flags.parcellated = (
     #     args.parcellate or args.bold_file_type == ".ptseries.nii")
@@ -341,11 +342,30 @@ def parse_args():
                     "Each use of the '--group' argument must have a least 3 values")
 
     # Create label for this execution attempt
+    args.combined_task_name = "-".join(sorted(args.task))
     tstamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    execution_label = f"oceanfla_task-{'-'.join(args.task)}_{tstamp}"
+    execution_label = f"oceanfla_task-{args.combined_task_name}_{tstamp}"
 
     if not hasattr(args, "output_dir") or args.output_dir is None:
         args.output_dir = args.derivs_dir / args.derivs_subfolder
+
+    # Check if old outputs exist
+    old_outputs, remove_old_outputs = [], False
+    ses_label = f"ses-{args.session}_" if args.session else ''
+    for task in args.task + [args.combined_task_name]:
+        if args.subject:
+            for sub in args.subject:
+                old_outputs.extend(args.output_dir.glob(f"sub-{sub}/**/func/sub-{sub}_{ses_label}*task-{task}_*"))
+        else:
+            old_outputs.extend(args.output_dir.glob(f"**/func/sub-*_{ses_label}*task-{task}_*"))
+    if len(old_outputs) > 1 and not args.force_overwrite:
+        from oceanfla.utilities import prompt_user_continue
+        remove_old_outputs = prompt_user_continue(dedent(f"""
+            The output directory for this execution contains derivative files for the input task(s): {args.task}
+            Would you like to delete these files and start fresh? If not, the program will exit now.
+            """))
+        if not remove_old_outputs:
+            exit(0)
 
     # Make the working directory
     if args.work_dir.name.startswith(execution_label.rsplit("_",1)[0]):
@@ -376,23 +396,31 @@ def parse_args():
 
     # Set up the logging variables
     args.log_dir = args.output_dir / "logs"
+    args.log_file = args.log_dir / f"{execution_label}.log"
     if args.subject and len(args.subject) == 1:
         if (args.preproc_bids / f"sub-{args.subject[0]}").exists():
             args.log_dir = args.output_dir / f"sub-{args.subject[0]}" / "logs"
+            args.log_file = args.log_dir / f"sub-{args.subject[0]}_{ses_label}{execution_label}.log"
     args.log_dir.mkdir(exist_ok=True, parents=True)
-    args.log_file = args.log_dir / f"{execution_label}.log"
+    
     args.log_level = logging.INFO
-
     if args.debug:
         args.log_level = logging.DEBUG
         args.keep_work = True
+        args.save_intermediates = True
 
     from oceanfla.config import set_configs
     set_configs(args.__dict__)
+
     if args.export_args:
         if not args.export_args.parent.is_dir():
             parser.error("Argument export path must be a file path in a directory that exists")
         logger.info(
             f"Exporting Configuration Arguments to: '{args.export_args}'")
         export_args_to_file(args, config_arguments, args.export_args)
+
+    if remove_old_outputs:
+        from oceanfla.utilities import clean_paths
+        logger.info("Removing previous outputs")
+        clean_paths(sorted(old_outputs))
 

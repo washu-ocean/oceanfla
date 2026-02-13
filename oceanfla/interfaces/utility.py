@@ -6,10 +6,24 @@ from nipype.interfaces.base import (
     TraitedSpec,
     DynamicTraitedSpec,
     traits,
+    InputMultiObject,
+    CommandLine
 )
 from bids.utils import listify
-from niworkflows.interfaces.bids import DerivativesDataSink, ReadSidecarJSON
+from traitlets import default
+from niworkflows.interfaces.bids import DerivativesDataSink, ReadSidecarJSON, _DerivativesDataSinkInputSpec
+from nipype.interfaces.base.support import RuntimeContext, InterfaceResult
+from nipype import config
+from nipype.utils.filemanip import indirectory
+import os
 
+
+def optional_trait(*in_traits, **kwargs):
+    return traits.Union(
+        None,
+        *in_traits,
+        **kwargs
+    )
 
 class MergeUnique(IOBase):
     input_spec = MergeInputSpec
@@ -55,21 +69,6 @@ class MergeUnique(IOBase):
 
 
 class ExtractDataGroupInputSpec(DynamicTraitedSpec, BaseInterfaceInputSpec):
-    # bold_list = traits.List(
-    #     trait=traits.File(exists=True),
-    #     desc="list of bold files"
-    # )
-
-    # confounds_list = traits.List(
-    #     trait=traits.File(exists=True),
-    #     desc="list of confounds files"
-    # )
-
-    # events_list = traits.List(
-    #     trait=traits.File(exists=True),
-    #     desc="list of event files"
-    # )
-
     task = traits.Str(desc="The task name of the data")
 
     run = traits.Int(desc="The run number of the data")
@@ -80,38 +79,15 @@ class ExtractDataGroupOutputSpec(TraitedSpec):
         exists=True,
         desc="The described bold file"
     )
-
     confounds_file = traits.File(
         exists=True,
         desc="The described confounds file"
     )
-
     events_file = traits.File(
         exists=True,
         desc="The described events file"
     )
 
-
-# class ExtractDataGroup(SimpleInterface):
-#     input_spec = ExtractDataGroupInputSpec
-#     output_spec = DynamicTraitedSpec
-
-#     def _run_interface(self, runtime):
-
-#         bold_file, confounds_file, events_file = extract_task_run_group(
-#             bold_list=self.inputs.bold_list,
-#             confounds_list=self.inputs.confounds_list,
-#             events_list=self.inputs.events_list,
-#             task_needed=self.inputs.task,
-#             run_needed=self.inputs.run,
-
-#         )
-
-#         self._results["bold_file"] = bold_file
-#         self._results["confounds_file"] = confounds_file
-#         self._results["events_file"] = events_file
-
-#         return runtime
     
 class ExtractDataGroup(IOBase):
     input_spec = ExtractDataGroupInputSpec
@@ -133,32 +109,6 @@ class ExtractDataGroup(IOBase):
         return outputs
 
 
-# def extract_task_run_group(bold_list: list,
-#                            confounds_list: list,
-#                            events_list: list,
-#                            task_needed: str,
-#                            run_needed: int):
-#     from oceanfla.config import get_bids_file
-#     run_dict = {
-#         "bold": None,
-#         "confounds": None,
-#         "events": None
-#     }
-#     for ftype, file_list in {"bold": bold_list, "confounds": confounds_list, "events": events_list}.items():
-#         for file in file_list:
-#             bids_file = get_bids_file(file)
-#             run = int(bids_file.entities.get("run", 1))
-#             if run == int(run_needed) and bids_file.entities["task"] == task_needed:
-#                 run_dict[ftype] = bids_file
-#                 break
-
-#     if not all(list(run_dict.values())):
-#         raise RuntimeError(
-#             f"Could not find all the needed files for run-{run_needed}")
-
-#     return run_dict["bold"], run_dict["confounds"], run_dict["events"]
-
-
 def extract_task_run_file(bids_list: list,
                            task_needed: str,
                            run_needed: int):
@@ -172,12 +122,6 @@ def extract_task_run_file(bids_list: list,
 
     raise RuntimeError(
         f"Could not find a file with entities task-{task_needed}, run-{run_needed}")
-
-
-class FLADataSink(DerivativesDataSink):
-    def __init__(self, allowed_entities=None, out_path_base=None, extra_bids_patterns=None, **inputs):
-        super().__init__(allowed_entities=allowed_entities, out_path_base=out_path_base, **inputs)
-        self._file_patterns += tuple(extra_bids_patterns)
 
 
 class ReadMetadataFileInputSpec(BaseInterfaceInputSpec):
@@ -244,3 +188,162 @@ def read_metadata_file(data_file: str,
 
     res_dict["metadata_dict"] = metadata_dict
     return res_dict
+
+
+class OptionalInterfaceSpec(DynamicTraitedSpec):
+    execute = traits.Bool(default_value=True, usedefault=True)
+    
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        inital_trait_values = self.trait_get()
+        for trait_name in self.copyable_trait_names():
+            current_trait = self.traits()[trait_name]
+            if hasattr(current_trait, "name_source"):
+                continue
+            # if self.remove_trait(trait_name):
+            self.add_trait(
+                trait_name,
+                traits.Union(
+                    current_trait,
+                    None,
+                    # default_value=None,
+                    usedefualt=current_trait.usedefault
+                )
+                # [current_trait, None], 
+            )
+            # trait_set_value = inital_trait_values[trait_name] if inital_trait_values[trait_name] else traits.Undefined
+            # if current_trait.usedefault:
+            #     trait_set_value = current_trait.default_value()[1]
+            # if trait_name == "execute":
+            #     trait_set_value = True
+            self.trait_set(**{trait_name: inital_trait_values[trait_name]})
+        
+
+
+class OptionalInterface(SimpleInterface):
+    def run(self, cwd=None, ignore_exception=None, **inputs):
+        """Execute this interface.
+
+        This interface will not raise an exception if runtime.returncode is
+        non-zero.
+
+        Parameters
+        ----------
+        cwd : specify a folder where the interface should be run
+        inputs : allows the interface settings to be updated
+
+        Returns
+        -------
+        results :  :obj:`nipype.interfaces.base.support.InterfaceResult`
+            A copy of the instance that was executed, provenance information and,
+            if successful, results
+
+        """
+        # print("IN RUN")
+        if hasattr(self.inputs, "execute") and not getattr(self.inputs, "execute"):
+            rtc = RuntimeContext(
+                resource_monitor=config.resource_monitor and self.resource_monitor,
+                ignore_exception=(
+                    ignore_exception
+                    if ignore_exception is not None
+                    else self.ignore_exception
+                ),
+            )
+
+            with indirectory(cwd or os.getcwd()):
+                self.inputs.trait_set(**inputs)
+
+            with rtc(self, cwd=cwd, redirect_x=self._redirect_x) as runtime:
+                outputs = None
+                inputs = self.inputs.get_traitsfree()
+                # SKIP Run interface
+                # runtime = self._pre_run_hook(runtime)
+                # runtime = self._run_interface(runtime)
+                # runtime = self._post_run_hook(runtime)
+                # Collect outputs
+                outputs = self._outputs()
+                if hasattr(outputs, "execute"):
+                    setattr(outputs, "execute", False)
+
+            results = InterfaceResult(
+                self.__class__,
+                rtc.runtime,
+                inputs=inputs,
+                outputs=outputs,
+                provenance=None,
+            )
+            return results
+        else:
+            return super().run(cwd=cwd, ignore_exception=ignore_exception, **inputs)
+        
+
+class OptionalCommandLineInterface(CommandLine):
+    def run(self, cwd=None, ignore_exception=None, **inputs):
+        """Execute this interface.
+
+        This interface will not raise an exception if runtime.returncode is
+        non-zero.
+
+        Parameters
+        ----------
+        cwd : specify a folder where the interface should be run
+        inputs : allows the interface settings to be updated
+
+        Returns
+        -------
+        results :  :obj:`nipype.interfaces.base.support.InterfaceResult`
+            A copy of the instance that was executed, provenance information and,
+            if successful, results
+
+        """
+        # print("IN RUN")
+        if hasattr(self.inputs, "execute") and not getattr(self.inputs, "execute"):
+            rtc = RuntimeContext(
+                resource_monitor=config.resource_monitor and self.resource_monitor,
+                ignore_exception=(
+                    ignore_exception
+                    if ignore_exception is not None
+                    else self.ignore_exception
+                ),
+            )
+
+            with indirectory(cwd or os.getcwd()):
+                self.inputs.trait_set(**inputs)
+
+            with rtc(self, cwd=cwd, redirect_x=self._redirect_x) as runtime:
+                outputs = None
+                inputs = self.inputs.get_traitsfree()
+                # SKIP Run interface
+                # runtime = self._pre_run_hook(runtime)
+                # runtime = self._run_interface(runtime)
+                # runtime = self._post_run_hook(runtime)
+                # Collect outputs
+                outputs = self._outputs()
+                if hasattr(outputs, "execute"):
+                    setattr(outputs, "execute", False)
+
+            results = InterfaceResult(
+                self.__class__,
+                rtc.runtime,
+                inputs=inputs,
+                outputs=outputs,
+                provenance=None,
+            )
+            return results
+        else:
+            return super().run(cwd=cwd, ignore_exception=ignore_exception, **inputs)
+        
+
+class FLADataSinkInputSpec(_DerivativesDataSinkInputSpec, OptionalInterfaceSpec):
+    in_file = traits.Union(
+        traits.File(exists=True), 
+        traits.List(),
+        None,
+        desc="the object to be saved"
+    )
+
+class FLADataSink(DerivativesDataSink, OptionalInterface):
+    input_spec = FLADataSinkInputSpec
+    def __init__(self, allowed_entities=None, out_path_base=None, extra_bids_patterns=None, **inputs):
+        super().__init__(allowed_entities=allowed_entities, out_path_base=out_path_base, **inputs)
+        self._file_patterns += tuple(extra_bids_patterns)

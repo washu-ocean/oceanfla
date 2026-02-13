@@ -6,11 +6,16 @@ from nipype.interfaces.base import (
     CommandLineInputSpec
 )
 from nipype.interfaces.workbench.base import WBCommand
-# from nipype.interfaces.workbench.cifti import CiftiSmoothOutputSpec
-# from bids.utils import listify
+from nipype.interfaces.workbench.cifti import (
+    CiftiSmooth, 
+    CiftiSmoothInputSpec, 
+    CiftiSmoothOutputSpec
+)
+
+from oceanfla.interfaces.utility import OptionalInterface, OptionalInterfaceSpec, OptionalCommandLineInterface
 
 
-class VolumeSmoothInputSpec(CommandLineInputSpec):
+class VolumeSmoothInputSpec(OptionalInterfaceSpec, CommandLineInputSpec):
     volume_in = File(
         exists=True,
         mandatory=True,
@@ -50,10 +55,10 @@ class VolumeSmoothInputSpec(CommandLineInputSpec):
         desc="the subvolume number or name to smooth"
     )
 
-class VolumeSmoothOutputSpec(TraitedSpec):
+class VolumeSmoothOutputSpec(OptionalInterfaceSpec):
     volume_out = File(exists=True, desc="output NIFTI file")
 
-class VolumeSmooth(WBCommand):
+class VolumeSmooth(OptionalInterface, WBCommand):
     input_spec = VolumeSmoothInputSpec
     output_spec = VolumeSmoothOutputSpec
 
@@ -131,4 +136,14 @@ class CiftiParcellate(WBCommand):
         return value_stem + new_ext
 
 
+class SurfaceSmoothInputSpec(CiftiSmoothInputSpec, OptionalInterfaceSpec):
+    pass
 
+
+class SurfaceSmoothOutputSpec(CiftiSmoothOutputSpec, OptionalInterfaceSpec):
+    pass
+
+
+class SurfaceSmooth(OptionalCommandLineInterface, CiftiSmooth):
+    input_spec = SurfaceSmoothInputSpec
+    output_spec = SurfaceSmoothOutputSpec
