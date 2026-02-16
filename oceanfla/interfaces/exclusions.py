@@ -6,7 +6,6 @@ from nipype.interfaces.base import (
     TraitedSpec,
     traits,
 )
-from nipype import Function
 
 
 class CheckRunRetentionInputSpec(BaseInterfaceInputSpec):

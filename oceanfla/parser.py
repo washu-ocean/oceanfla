@@ -1,6 +1,5 @@
 import argparse
 from pathlib import Path
-import os
 from textwrap import dedent
 from oceanfla.oceanparse import OceanParser
 from oceanfla.utilities import export_args_to_file

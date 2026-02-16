@@ -6,7 +6,7 @@ from nipype.interfaces.base import (
     TraitedSpec
 )
 from pathlib import Path
-from nipype import logging, Function
+from nipype import Function
 
 
 class EventsMatrixInputSpec(BaseInterfaceInputSpec):

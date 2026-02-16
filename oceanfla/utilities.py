@@ -9,7 +9,7 @@ import json
 import logging
 import sys
 from collections.abc import Iterable
-from oceanfla.config import finish_logging, get_logger
+from oceanfla.config import finish_logging
 
 logger = logging.getLogger("nipype.utils")
 

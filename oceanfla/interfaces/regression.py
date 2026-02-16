@@ -1,11 +1,9 @@
-from click import option
 from nipype.interfaces.base import (
     BaseInterfaceInputSpec,
     SimpleInterface,
     TraitedSpec,
     traits,
 )
-from sqlalchemy import func
 from oceanfla.interfaces.utility import ( 
     OptionalInterface, 
     OptionalInterfaceSpec,
@@ -144,6 +142,10 @@ class ConcatRegressionData(OptionalInterface):
         design_matrices = listify(self.inputs.design_matrices_in)
         tmask_files = listify(self.inputs.tmask_files_in)
 
+        print(len(func_files))
+        print(len(design_matrices))
+        print(len(tmask_files))
+
         self._results["bold_file"], self._results["design_matrix"], self._results["tmask_file"], self._results["execute"] = combine_regression_data(
             func_list=func_files,
             design_matrix_files=design_matrices,
@@ -281,6 +283,10 @@ def combine_regression_data(tasks: list,
                                 if data_list else None for data_list in
                                 [func_list, tmask_files, design_matrix_files]]
         func_list, tmask_files, design_matrix_files = remaining_data_lists
+
+    print(len(func_list))
+    print(len(tmask_files))
+    print(len(design_matrix_files))
     
     
     func_data_list = [load_data(f, brain_mask) for f in func_list]

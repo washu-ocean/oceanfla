@@ -1,12 +1,11 @@
 from nipype import Node, Workflow, Function
 from nipype.interfaces.io import BIDSDataGrabber
 from nipype.interfaces.utility import IdentityInterface, Select
-from nipype.interfaces.workbench.cifti import CiftiSmooth
-from niworkflows.utils.bids import collect_participants
+# from niworkflows.utils.bids import collect_participants
 from oceanfla.interfaces.reporting import PlotDesign
 from oceanfla.interfaces.utility import FLADataSink, ReadMetadataFile
 from oceanfla.interfaces.clean import FilterData, PercentChange
-from oceanfla.interfaces.events import EventsMatrix, GetVolumeCount, ModifyEventsFile
+from oceanfla.interfaces.events import EventsMatrix, ModifyEventsFile, get_number_of_volumes
 from oceanfla.interfaces.exclusions import CheckRunRetention, CheckRuntSNR
 from oceanfla.interfaces.nuisance import GenerateNuisanceMatrix
 from oceanfla.interfaces.regression import ConcatRegressionData, MakeRunDesign, RunGLMRegression
@@ -191,7 +190,11 @@ def build_session_wf(subject, session=None):
             )
 
             get_volumes_node = Node(
-                GetVolumeCount,
+                Function(
+                    function=get_number_of_volumes,
+                    input_names=["bold_in", "brain_mask"],
+                    output_names=["volumes"]
+                ),
                 name=f"task_{task}_run_{run}_get_run_volumes_node"
             )
             get_volumes_node.inputs.brain_mask = all_opts.brain_mask
@@ -774,7 +777,6 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
 
 
 def build_run_workflow(run, task: str, file_extension: str):
-    from oceanfla.interfaces.nuisance import make_regressor_run_specific
 
     ### Define the workflow and the inputnode ###
     wf_name = f"task_{task}_run_{run}_processsing_wf"
