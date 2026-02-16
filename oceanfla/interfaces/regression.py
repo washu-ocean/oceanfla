@@ -4,39 +4,41 @@ from nipype.interfaces.base import (
     TraitedSpec,
     traits,
 )
+from oceanfla.interfaces.utility import ( 
+    OptionalInterface, 
+    OptionalInterfaceSpec,
+)
 
-
-class RunGLMRegressionInputSpec(BaseInterfaceInputSpec):
-    bold_file_in = traits.File(
-        exists=True,
+class RunGLMRegressionInputSpec(OptionalInterfaceSpec):
+    bold_file_in = traits.Union(
+        traits.File(exists=True),
+        None,
         desc="The functional data file"
     )
-
-    design_matrix = traits.File(
-        exists=True,
+    design_matrix = traits.Union(
+        traits.File(exists=True),
+        None,
         desc="The design matrix for the regression"
     )
-
     tmask_file = traits.Union(
         traits.File(exists=True),
         None,
         desc="The temporal mask file",
     )
-
     stdscale = traits.Bool(
         default_value=False,
         desc="Flag to indicate standard scaling the data before the regression"
     )
-
     brain_mask = traits.Union(
         traits.File(exists=True),
         None,
         default_value=None,
+        usedefault=True,
         desc="The brain mask that accompanies volumetric data"
     )
 
 
-class RunGLMRegressionOutputSpec(TraitedSpec):
+class RunGLMRegressionOutputSpec(OptionalInterfaceSpec):
     beta_files = traits.List(
         trait=traits.File(exists=True),
         desc=""
@@ -52,7 +54,7 @@ class RunGLMRegressionOutputSpec(TraitedSpec):
         desc="")
 
 
-class RunGLMRegression(SimpleInterface):
+class RunGLMRegression(OptionalInterface):
     input_spec = RunGLMRegressionInputSpec
     output_spec = RunGLMRegressionOutputSpec
 
@@ -73,58 +75,36 @@ class RunGLMRegression(SimpleInterface):
         return runtime
 
 
-class ConcatRegressionDataInputSpec(BaseInterfaceInputSpec):
+class ConcatRegressionDataInputSpec(OptionalInterfaceSpec):
     bold_files_in = traits.Union(
-        traits.List(trait=traits.File(exists=True)),
+        traits.List(),
         traits.File(exists=True),
         desc="A list of functional data files"
     )
-
-    event_matrices = traits.Union(
-        None,
-        traits.List(trait=traits.File(exists=True)),
+    design_matrices_in = traits.Union(
+        traits.List(),
         traits.File(exists=True),
         desc="A list of event matrix files"
     )
-
-    nuisance_matrices = traits.Union(
-        None,
-        traits.List(trait=traits.File(exists=True)),
-        traits.File(exists=True),
-        desc="A list of nuisance matrix files"
-    )
-
     tmask_files_in = event_matrices = traits.Union(
-        traits.List(trait=traits.File(exists=True)),
+        traits.List(),
+        None,
         traits.File(exists=True),
         desc="A list of temporal mask files "
     )
-
-    regressor_columns = traits.Union(
-        None,
-        traits.List(trait=traits.Str),
-        default_value=None,
-        desc="A list of column names to be used from the nuisance matrices."
-    )
-
-    inclusion_list = traits.Union(
-        None,
-        traits.List(trait=traits.Bool),
-        default_value=None,
+    inclusion_list = traits.List(
+        trait=traits.Bool,
         desc="A list of boolean values to indicate inclusion in the final concatenated data"
     )
-
-    include_global_mean = traits.Bool(
+    include_intercept = traits.Bool(
         default_value=True,
         desc=""
     )
-
     tasks = traits.Union(
         traits.List(trait=traits.Str),
         traits.Str,
         desc="The task(s) that this regression is for"
     )
-
     brain_mask = traits.Union(
         traits.File(exists=True),
         None,
@@ -133,30 +113,25 @@ class ConcatRegressionDataInputSpec(BaseInterfaceInputSpec):
     )
 
 
-class ConcatRegressionDataOutputSpec(TraitedSpec):
-
-    bold_file = traits.File(
-        exists=True,
-        desc="")
-
-    design_matrix = traits.File(
-        exists=True,
-        desc="")
-
-    tmask_file = traits.Union(
-        traits.File(exists=True),
+class ConcatRegressionDataOutputSpec(OptionalInterfaceSpec):
+    bold_file = traits.Union(
         None,
+        traits.File(exists=True),
+        desc=""
+    )
+    design_matrix = traits.Union(
+        None,
+        traits.File(exists=True),
+        desc=""
+    )
+    tmask_file = traits.Union(
+        None,
+        traits.File(exists=True),
         desc="The concatenation of the input list 'tmask_files_in'"
     )
 
-    residual_design_matrix = traits.Union(
-        traits.File(exists=True),
-        None,
-        desc="The design matrix using the columns that are not needed for the current regression"
-    )
 
-
-class ConcatRegressionData(SimpleInterface):
+class ConcatRegressionData(OptionalInterface):
     input_spec = ConcatRegressionDataInputSpec
     output_spec = ConcatRegressionDataOutputSpec
 
@@ -164,26 +139,22 @@ class ConcatRegressionData(SimpleInterface):
         from bids.utils import listify
 
         func_files = listify(self.inputs.bold_files_in)
-        event_matrices = listify(self.inputs.event_matrices)
+        design_matrices = listify(self.inputs.design_matrices_in)
         tmask_files = listify(self.inputs.tmask_files_in)
-        nuisance_matrices = listify(self.inputs.nuisance_matrices)
 
-        final_func_file, final_tmask, final_design_matrix, residual_design_matrix = combine_regression_data(
+        print(len(func_files))
+        print(len(design_matrices))
+        print(len(tmask_files))
+
+        self._results["bold_file"], self._results["design_matrix"], self._results["tmask_file"], self._results["execute"] = combine_regression_data(
             func_list=func_files,
-            event_matrix_files=event_matrices,
+            design_matrix_files=design_matrices,
             tmask_files=tmask_files,
-            nuisance_matrix_files=nuisance_matrices,
-            regressor_columns=self.inputs.regressor_columns,
             inclusion_list=self.inputs.inclusion_list,
-            global_mean=self.inputs.include_global_mean,
+            add_intercept=self.inputs.include_intercept,
             tasks=self.inputs.tasks,
             brain_mask=self.inputs.brain_mask
         )
-
-        self._results["bold_file"] = final_func_file
-        self._results["tmask_file"] = final_tmask
-        self._results["design_matrix"] = final_design_matrix
-        self._results["residual_design_matrix"] = residual_design_matrix
 
         return runtime
 
@@ -206,10 +177,11 @@ def massuni_linGLM(func_file: str,
     mask: npt.ArrayLike
         Numpy array representing a mask to apply to the two other parameters
     """
-    from oceanfla.utilities import load_data, create_image_like, replace_entities
+    from oceanfla.utilities import load_data, create_image_like, replace_entities, is_cifti_file
     import pandas as pd
     import numpy as np
     from sklearn.preprocessing import StandardScaler
+    from bids.layout import parse_file_entities
 
     func_data = load_data(func_file, brain_mask)
     design_matrix = pd.read_csv(design_matrix, sep="\t")
@@ -232,7 +204,7 @@ def massuni_linGLM(func_file: str,
         masked_func_data = func_ss.fit_transform(masked_func_data)
         masked_design_matrix = design_ss.fit_transform(masked_design_matrix)
 
-    # comput beta values
+    # compute beta values
     inv_mat = np.linalg.pinv(masked_design_matrix)
     beta_data = np.dot(inv_mat, masked_func_data)
 
@@ -251,9 +223,13 @@ def massuni_linGLM(func_file: str,
     # beta files
     beta_files, beta_labels, = [], []
     for i, beta_label in enumerate(design_matrix.columns):
+        beta_entities = entities_base | {"suffix": f"beta-{beta_label}_boldmap"}
+        if is_cifti_file(func_file):
+            old_ext = parse_file_entities(func_file)["extension"]
+            beta_entities["ext"] = old_ext.replace("tseries", "scalar")
         beta_filename = replace_entities(
             file=func_file,
-            entities=entities_base | {"suffix": f"beta-{beta_label}_boldmap", "ext":".dscalar.nii"}
+            entities=beta_entities
         )
         create_image_like(
             data=(beta_data[i])[np.newaxis, :],
@@ -279,67 +255,44 @@ def massuni_linGLM(func_file: str,
     return (beta_files, beta_labels, residual_filename)
 
 
-def combine_regression_data(func_list: list,
-                            tasks: list,
+def combine_regression_data(tasks: list,
+                            func_list: list=None,
                             tmask_files: list = None,
-                            event_matrix_files: list = None,
-                            nuisance_matrix_files: list = None,
-                            regressor_columns: list[str] = None,
+                            design_matrix_files: list = None,
                             inclusion_list: list[bool] = None,
-                            global_mean=True,
+                            add_intercept=True,
                             brain_mask: str = None):
     from oceanfla.utilities import replace_entities, load_data, create_image_like
     import numpy as np
     import pandas as pd
 
-    func_data_list = [load_data(f, brain_mask) for f in func_list]
-    event_matrices = [pd.read_csv(
-        f, sep="\t") for f in event_matrix_files] if event_matrix_files else None
-    tmask_list = [np.loadtxt(f) for f in tmask_files] if tmask_files else None
-    nuisance_matrices = [pd.read_csv(
-        f, sep="\t") for f in nuisance_matrix_files] if nuisance_matrix_files else None
-
     lengths = [len(x) for x in
-               [func_data_list, tmask_list, event_matrices,
-                   nuisance_matrices, inclusion_list]
+               [func_list, tmask_files, design_matrix_files, inclusion_list]
                if x]
     if not len(set(lengths)) == 1:
         raise RuntimeError(
             f"All input lists must be the same length: {lengths}")
-    needed_len = lengths[0]
 
     # remove any runs that are being excluded
     if inclusion_list:
+        if not any(inclusion_list):
+            res_list = [None for data_list in [func_list, tmask_files, design_matrix_files]] + [False]
+            return res_list
+        
         remaining_data_lists = [[x for i, x in enumerate(data_list) if inclusion_list[i]]
                                 if data_list else None for data_list in
-                                [func_data_list, tmask_list, event_matrices, nuisance_matrices]]
-        func_data_list, tmask_list, event_matrices, nuisance_matrices = remaining_data_lists
-        needed_len = sum(inclusion_list)
+                                [func_list, tmask_files, design_matrix_files]]
+        func_list, tmask_files, design_matrix_files = remaining_data_lists
 
-    # need either event matrices or nuisance matrices
-    input_lists = [l for l in [event_matrices,
-                               nuisance_matrices] if l]
-    if len(input_lists) < 1:
-        raise RuntimeError(
-            f"Regression data must include event data or nuisance data, but recieved neither")
+    print(len(func_list))
+    print(len(tmask_files))
+    print(len(design_matrix_files))
     
-    # combine the data matrices if needed
-    design_data_list = [tuple(in_list[i] for in_list in input_lists) for i in range(needed_len)]
-    for i in range(needed_len):
-        time_axis = [len(design_data_list[i][0]), func_data_list[i].shape[0]]
-        if len(design_data_list[i]) == 2:
-            time_axis.append(len(design_data_list[i][1]))
-        if not len(set(time_axis)) == 1:
-            raise RuntimeError(
-                f"Grouped functional data and events matrix must all have the same number of timepoints, but don't: {set(time_axis)}")
-
-        run_design = (
-            pd.concat([design_data_list[i][0].reset_index(drop=True),
-                       design_data_list[i][1].reset_index(drop=True)], axis=1)
-        ) if len(design_data_list[i]) == 2 else (
-            design_data_list[i][0])
-
-        design_data_list[i] = run_design
+    
+    func_data_list = [load_data(f, brain_mask) for f in func_list]
+    design_matrices = [pd.read_csv(
+        f, sep="\t") for f in design_matrix_files]
+    tmask_list = [np.loadtxt(f) for f in tmask_files] if tmask_files else None
 
     # concatenate all of the data on the time axis
     task_label = "-".join(tasks)
@@ -360,6 +313,20 @@ def combine_regression_data(func_list: list,
         brain_mask=brain_mask)
     res_list.append(final_func_file)
 
+    # design data
+    final_design = pd.concat(design_matrices, axis=0,
+                             ignore_index=True).fillna(0)
+    if add_intercept:
+        final_design.loc[:, "intercept"] = 1
+
+    final_design_file = replace_entities(
+        file=design_matrix_files[0],
+        entities=entities_base | {"suffix": "design"}
+    )
+    final_design.to_csv(final_design_file, index=False, sep="\t")
+
+    res_list.append(final_design_file)
+
     # tmask data
     final_tmask = None
     if tmask_list is not None:
@@ -373,33 +340,98 @@ def combine_regression_data(func_list: list,
                    np.concatenate(tmask_list, axis=0))
     res_list.append(final_tmask)
 
-    # design data
-    final_design = pd.concat(design_data_list, axis=0,
-                             ignore_index=True).fillna(0)
-    residual_design_file = None
-    if regressor_columns:
-        design_columns = final_design.columns.to_list()
-        residual_columns = [
-            dc for dc in design_columns if dc not in regressor_columns]
-        residual_design = final_design.loc[:, residual_columns]
-        final_design = final_design.loc[:, regressor_columns]
-
-        residual_design_file = replace_entities(
-            file=event_matrix_files[0],
-            entities=entities_base | {"suffix": "residual-design"}
-        )
-        residual_design.to_csv(residual_design_file, index=False, sep="\t")
-
-    if global_mean:
-        final_design.loc[:, "intercept"] = 1
-
-    final_design_file = replace_entities(
-        file=event_matrix_files[0],
-        entities=entities_base | {"suffix": "design"}
-    )
-    final_design.to_csv(final_design_file, index=False, sep="\t")
-
-    res_list.append(final_design_file)
-    res_list.append(residual_design_file)
-
+    res_list.append(True)
     return res_list
+
+
+class MakeRunDesignInputSpec(BaseInterfaceInputSpec):
+    event_matrix = traits.File(
+        exists=True,
+        desc="An event matrix file"
+    )
+    nuisance_matrix = traits.Union(
+        traits.File(exists=True),
+        None,
+        default_value=None,
+        desc="An nuisance matrix file"
+    )
+    nuisance_regressors = traits.Union(
+        traits.List(trait=traits.Str),
+        None,
+        default_value=None,
+        desc="A list of column names to be used for nuisance regression."
+    )
+
+
+class MakeRunDesignOutputSpec(TraitedSpec):
+    nuisance_design = traits.Union(
+        traits.File(exists=True),
+        None,
+        default_value=None,
+        desc="The run-level design matrix for nuisance regression"
+    )
+    main_design = traits.File(
+        exists=True,
+        desc="The run-level design matrix for main effect regression"
+    )
+
+
+class MakeRunDesign(SimpleInterface):
+    input_spec = MakeRunDesignInputSpec
+    output_spec = MakeRunDesignOutputSpec
+
+    def _run_interface(self, runtime):
+
+        self._results["main_design"], self._results["nuisance_design"] = make_run_design_files(
+            event_matrix=self.inputs.event_matrix,
+            nuisance_matrix=self.inputs.nuisance_matrix,
+            nuisance_regressors=self.inputs.nuisance_regressors
+        )
+        return runtime
+
+
+def make_run_design_files(event_matrix: str,
+                          nuisance_matrix: str = None,
+                          nuisance_regressors: list[str] = None):
+    import pandas as pd
+    import numpy as np
+    from oceanfla.utilities import replace_entities
+
+    event_df = pd.read_csv(event_matrix, sep="\t")
+    main_design_file = replace_entities(
+        event_matrix, 
+        {"suffix": "main-design", "ext": ".tsv", "path": None}
+    )
+    nuisance_design_file = replace_entities(
+        nuisance_matrix,
+        {"suffix": "nuisance-design", "ext": ".tsv", "path": None}
+    )
+    
+    combo_df = None
+    if not nuisance_matrix:
+        if not nuisance_regressors:
+            return event_matrix, None
+        else:
+            combo_df = event_df
+    else:
+        nuisance_df = pd.read_csv(nuisance_matrix, sep="\t")
+        combo_df = pd.concat([event_df.reset_index(drop=True), 
+                                nuisance_df.reset_index(drop=True)], 
+                              axis=1)
+        if not nuisance_regressors:
+            combo_df.to_csv(main_design_file, sep="\t", index=False)
+            return main_design_file, None
+    
+    all_design_columns = combo_df.columns.to_list()
+    main_regressors = [
+        dc for dc in all_design_columns if dc not in nuisance_regressors]
+    if len(main_regressors) < 1:
+        raise ValueError("All regressor columns are being used for nuisance regression")
+    
+    nuisance_design = combo_df.loc[:, nuisance_regressors]
+    main_design = combo_df.loc[:, main_regressors]
+
+    main_design.to_csv(main_design_file, sep="\t", index=False)
+    nuisance_design.to_csv(nuisance_design_file, sep="\t", index=False)
+
+    return main_design_file, nuisance_design_file

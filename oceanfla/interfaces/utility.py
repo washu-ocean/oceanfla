@@ -6,15 +6,31 @@ from nipype.interfaces.base import (
     TraitedSpec,
     DynamicTraitedSpec,
     traits,
+    CommandLine
 )
 from bids.utils import listify
-from niworkflows.interfaces.bids import DerivativesDataSink, ReadSidecarJSON
+from niworkflows.interfaces.bids import DerivativesDataSink, _DerivativesDataSinkInputSpec
+from nipype.interfaces.base.support import RuntimeContext, InterfaceResult
+from nipype import config
+from nipype.utils.filemanip import indirectory
+import os
 
+
+def optional_trait(*in_traits, **kwargs):
+    return traits.Union(
+        None,
+        *in_traits,
+        **kwargs
+    )
 
 class MergeUnique(IOBase):
     input_spec = MergeInputSpec
     output_spec = DynamicTraitedSpec
     _sep = "_x"
+
+    def __init__(self, collapse_none=True, **inputs):
+        super().__init__(**inputs)
+        self._collapse_none = collapse_none
 
     # def _run_interface(self, runtime):
     def _list_outputs(self):
@@ -30,7 +46,7 @@ class MergeUnique(IOBase):
         for input_key in input_key_name_set:
             out = []
             values = [getattr(self.inputs, f"{input_key}{self._sep}{idx}")
-                      for idx in range(1, max_index + 1)
+                      for idx in range(0, max_index + 1)
                       if hasattr(self.inputs,  f"{input_key}{self._sep}{idx}")]
             if self.inputs.axis == "vstack":
                 for value in values:
@@ -43,28 +59,14 @@ class MergeUnique(IOBase):
                 lists = [listify(val) if val is not None else [None]
                          for val in values]
                 out = [[val[i] for val in lists] for i in range(len(lists[0]))]
-            if all([o is None for o in out]):
+
+            if all([o is None for o in out]) and self._collapse_none:
                 out = None
             outputs[input_key] = out
         return outputs
 
 
-class ExtractDataGroupInputSpec(BaseInterfaceInputSpec):
-    bold_list = traits.List(
-        trait=traits.File(exists=True),
-        desc="list of bold files"
-    )
-
-    confounds_list = traits.List(
-        trait=traits.File(exists=True),
-        desc="list of confounds files"
-    )
-
-    events_list = traits.List(
-        trait=traits.File(exists=True),
-        desc="list of event files"
-    )
-
+class ExtractDataGroupInputSpec(DynamicTraitedSpec, BaseInterfaceInputSpec):
     task = traits.Str(desc="The task name of the data")
 
     run = traits.Int(desc="The run number of the data")
@@ -75,70 +77,49 @@ class ExtractDataGroupOutputSpec(TraitedSpec):
         exists=True,
         desc="The described bold file"
     )
-
     confounds_file = traits.File(
         exists=True,
         desc="The described confounds file"
     )
-
     events_file = traits.File(
         exists=True,
         desc="The described events file"
     )
 
-
-class ExtractDataGroup(SimpleInterface):
+    
+class ExtractDataGroup(IOBase):
     input_spec = ExtractDataGroupInputSpec
-    output_spec = ExtractDataGroupOutputSpec
+    output_spec = DynamicTraitedSpec
 
-    def _run_interface(self, runtime):
-
-        bold_file, confounds_file, events_file = extract_task_run_group(
-            bold_list=self.inputs.bold_list,
-            confounds_list=self.inputs.confounds_list,
-            events_list=self.inputs.events_list,
-            task_needed=self.inputs.task,
-            run_needed=self.inputs.run,
-
-        )
-
-        self._results["bold_file"] = bold_file
-        self._results["confounds_file"] = confounds_file
-        self._results["events_file"] = events_file
-
-        return runtime
+    def _list_outputs(self):
+        outputs = self._outputs().get()
+        for input_name in self.inputs.get().keys():
+            if input_name in ["task", "run"]:
+                continue
+            if getattr(self.inputs, input_name) is None:
+                outputs[input_name] = None
+            else:
+                outputs[input_name] = extract_task_run_file(
+                    bids_list=getattr(self.inputs, input_name),
+                    task_needed=self.inputs.task,
+                    run_needed=self.inputs.run
+                )
+        return outputs
 
 
-def extract_task_run_group(bold_list: list,
-                           confounds_list: list,
-                           events_list: list,
+def extract_task_run_file(bids_list: list,
                            task_needed: str,
                            run_needed: int):
-    from oceanfla.config import get_bids_file
-    run_dict = {
-        "bold": None,
-        "confounds": None,
-        "events": None
-    }
-    for ftype, file_list in {"bold": bold_list, "confounds": confounds_list, "events": events_list}.items():
-        for file in file_list:
-            bids_file = get_bids_file(file)
-            run = int(bids_file.entities.get("run", 1))
-            if run == int(run_needed) and bids_file.entities["task"] == task_needed:
-                run_dict[ftype] = bids_file
-                break
+    from bids.layout import parse_file_entities
+    
+    for file in bids_list:
+        bids_file_entities = parse_file_entities(file)
+        run = int(bids_file_entities.get("run", 1))
+        if run == int(run_needed) and bids_file_entities["task"] == task_needed:
+            return file
 
-    if not all(list(run_dict.values())):
-        raise RuntimeError(
-            f"Could not find all the needed files for run-{run_needed}")
-
-    return run_dict["bold"], run_dict["confounds"], run_dict["events"]
-
-
-class FLADataSink(DerivativesDataSink):
-    def __init__(self, allowed_entities=None, out_path_base=None, extra_bids_patterns=None, **inputs):
-        super().__init__(allowed_entities=allowed_entities, out_path_base=out_path_base, **inputs)
-        self._file_patterns += tuple(extra_bids_patterns)
+    raise RuntimeError(
+        f"Could not find a file with entities task-{task_needed}, run-{run_needed}")
 
 
 class ReadMetadataFileInputSpec(BaseInterfaceInputSpec):
@@ -170,24 +151,197 @@ class ReadMetadataFile(SimpleInterface):
         return base
 
     def _run_interface(self, runtime):
-        from oceanfla.utilities import replace_entity
-        from pathlib import Path
-        import json
 
-        metadata_dict = {}
-        metadata_path = Path(replace_entity(self.inputs.bids_file, "ext", ".json"))
+        metadata_results = read_metadata_file(
+            data_file=self.inputs.bids_file,
+            requested_fields=self._fields,
+            strict=self._error_on_missing
+        )
+        self._results.update(metadata_results)
 
-        if metadata_path.exists():
-            with open(metadata_path, "r") as metaf:
-                metadata_dict = json.load(metaf)
-            
-            for fname in self._fields:
-                if self._error_on_missing and fname not in metadata_dict:
-                    raise KeyError(
-                        f'Metadata field "{fname}" not found for file {self.inputs.in_file}'
-                    )
-                self._results[fname] = metadata_dict.get(fname, traits.Undefined)
-
-        self._results["metadata_dict"] = metadata_dict
         return runtime
         
+
+def read_metadata_file(data_file: str,
+                       requested_fields: list[str],
+                       strict: bool = True):
+    from oceanfla.utilities import replace_entity
+    from pathlib import Path
+    import json
+
+    res_dict = {}
+    metadata_dict = {}
+    metadata_path = Path(replace_entity(data_file, "ext", ".json"))
+
+    if metadata_path.exists():
+        with open(metadata_path, "r") as metaf:
+            metadata_dict = json.load(metaf)
+        
+        for fname in requested_fields:
+            if strict and fname not in metadata_dict:
+                raise KeyError(
+                    f'Metadata field "{fname}" not found for file {data_file}'
+                )
+            res_dict[fname] = metadata_dict.get(fname, traits.Undefined)
+
+    res_dict["metadata_dict"] = metadata_dict
+    return res_dict
+
+
+class OptionalInterfaceSpec(DynamicTraitedSpec):
+    execute = traits.Bool(default_value=True, usedefault=True)
+    
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        inital_trait_values = self.trait_get()
+        for trait_name in self.copyable_trait_names():
+            current_trait = self.traits()[trait_name]
+            if hasattr(current_trait, "name_source"):
+                continue
+            # if self.remove_trait(trait_name):
+            self.add_trait(
+                trait_name,
+                traits.Union(
+                    current_trait,
+                    None,
+                    # default_value=None,
+                    usedefualt=current_trait.usedefault
+                )
+                # [current_trait, None], 
+            )
+            # trait_set_value = inital_trait_values[trait_name] if inital_trait_values[trait_name] else traits.Undefined
+            # if current_trait.usedefault:
+            #     trait_set_value = current_trait.default_value()[1]
+            # if trait_name == "execute":
+            #     trait_set_value = True
+            self.trait_set(**{trait_name: inital_trait_values[trait_name]})
+        
+
+
+class OptionalInterface(SimpleInterface):
+    def run(self, cwd=None, ignore_exception=None, **inputs):
+        """Execute this interface.
+
+        This interface will not raise an exception if runtime.returncode is
+        non-zero.
+
+        Parameters
+        ----------
+        cwd : specify a folder where the interface should be run
+        inputs : allows the interface settings to be updated
+
+        Returns
+        -------
+        results :  :obj:`nipype.interfaces.base.support.InterfaceResult`
+            A copy of the instance that was executed, provenance information and,
+            if successful, results
+
+        """
+        # print("IN RUN")
+        if hasattr(self.inputs, "execute") and not getattr(self.inputs, "execute"):
+            rtc = RuntimeContext(
+                resource_monitor=config.resource_monitor and self.resource_monitor,
+                ignore_exception=(
+                    ignore_exception
+                    if ignore_exception is not None
+                    else self.ignore_exception
+                ),
+            )
+
+            with indirectory(cwd or os.getcwd()):
+                self.inputs.trait_set(**inputs)
+
+            with rtc(self, cwd=cwd, redirect_x=self._redirect_x) as runtime:
+                outputs = None
+                inputs = self.inputs.get_traitsfree()
+                # SKIP Run interface
+                # runtime = self._pre_run_hook(runtime)
+                # runtime = self._run_interface(runtime)
+                # runtime = self._post_run_hook(runtime)
+                # Collect outputs
+                outputs = self._outputs()
+                if hasattr(outputs, "execute"):
+                    setattr(outputs, "execute", False)
+
+            results = InterfaceResult(
+                self.__class__,
+                rtc.runtime,
+                inputs=inputs,
+                outputs=outputs,
+                provenance=None,
+            )
+            return results
+        else:
+            return super().run(cwd=cwd, ignore_exception=ignore_exception, **inputs)
+        
+
+class OptionalCommandLineInterface(CommandLine):
+    def run(self, cwd=None, ignore_exception=None, **inputs):
+        """Execute this interface.
+
+        This interface will not raise an exception if runtime.returncode is
+        non-zero.
+
+        Parameters
+        ----------
+        cwd : specify a folder where the interface should be run
+        inputs : allows the interface settings to be updated
+
+        Returns
+        -------
+        results :  :obj:`nipype.interfaces.base.support.InterfaceResult`
+            A copy of the instance that was executed, provenance information and,
+            if successful, results
+
+        """
+        # print("IN RUN")
+        if hasattr(self.inputs, "execute") and not getattr(self.inputs, "execute"):
+            rtc = RuntimeContext(
+                resource_monitor=config.resource_monitor and self.resource_monitor,
+                ignore_exception=(
+                    ignore_exception
+                    if ignore_exception is not None
+                    else self.ignore_exception
+                ),
+            )
+
+            with indirectory(cwd or os.getcwd()):
+                self.inputs.trait_set(**inputs)
+
+            with rtc(self, cwd=cwd, redirect_x=self._redirect_x) as runtime:
+                outputs = None
+                inputs = self.inputs.get_traitsfree()
+                # SKIP Run interface
+                # runtime = self._pre_run_hook(runtime)
+                # runtime = self._run_interface(runtime)
+                # runtime = self._post_run_hook(runtime)
+                # Collect outputs
+                outputs = self._outputs()
+                if hasattr(outputs, "execute"):
+                    setattr(outputs, "execute", False)
+
+            results = InterfaceResult(
+                self.__class__,
+                rtc.runtime,
+                inputs=inputs,
+                outputs=outputs,
+                provenance=None,
+            )
+            return results
+        else:
+            return super().run(cwd=cwd, ignore_exception=ignore_exception, **inputs)
+        
+
+class FLADataSinkInputSpec(_DerivativesDataSinkInputSpec, OptionalInterfaceSpec):
+    in_file = traits.Union(
+        traits.File(exists=True), 
+        traits.List(),
+        None,
+        desc="the object to be saved"
+    )
+
+class FLADataSink(DerivativesDataSink, OptionalInterface):
+    input_spec = FLADataSinkInputSpec
+    def __init__(self, allowed_entities=None, out_path_base=None, extra_bids_patterns=None, **inputs):
+        super().__init__(allowed_entities=allowed_entities, out_path_base=out_path_base, **inputs)
+        self._file_patterns += tuple(extra_bids_patterns)

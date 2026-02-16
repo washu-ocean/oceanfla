@@ -52,8 +52,6 @@ def make_tmask(confounds_file: Path | str,
                 "path": None
         })
     
-    # tmask_df = pd.DataFrame(columns=[f"{str(fd_threshold)}mm-tmask"], data=fd_mask)
-    # tmask_df.to_csv(out_file, sep="\t", index=False)
     np.savetxt(out_file, fd_mask)
     return out_file
 
@@ -64,10 +62,6 @@ class _MakeTmaskInputSpec(BaseInterfaceInputSpec):
         mandatory=True,
         desc="Path to nuisance matrix (as a .csv or .tsv)"
     )
-    # out_file = File(
-    #     mandatory=True,
-    #     desc="Path to tmask (a .txt file)"
-    # )
     fd_threshold = traits.Float(
         mandatory=True,
         desc="FD threshold for masking frames."
@@ -106,11 +100,6 @@ class MakeTmask(SimpleInterface):
         )
 
         return runtime
-
-    # def _list_outputs(self):
-    #     outputs = self._outputs().get()
-    #     outputs['out_file'] = getattr(self, '_results')
-    #     return outputs
 
 
 def make_tmask_tsv(tmask_file:str, fd_threshold:float):

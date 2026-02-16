@@ -34,7 +34,7 @@ class Options():
                 if isinstance(v, bids.BIDSLayout):
                     self.layouts.append(v)
                 # check for variable regroupings
-                elif k == "group":
+                elif k == "group" and v:
                     option_msg_list.append(f" {k} : {v}")
                     gmap = dict()
                     for regroup in v:
@@ -104,7 +104,7 @@ def get_layout_for_file(file) -> bids.BIDSLayout:
 
 
 
-def get_bids_file(file:str):
+def get_bids_file(file):
     '''
     Function to return the corresponding bids.layout.BIDSFile 
     for a given filepath 
@@ -121,6 +121,8 @@ def get_bids_file(file:str):
         The BIDSFile object or None if it is not found
     
     '''
+    if isinstance(file, bids.layout.BIDSFile):
+        return file
     file_layout = get_layout_for_file(file)
     return file_layout.get_file(file)
 
@@ -208,35 +210,3 @@ def close_layouts():
     del all_opts.layouts[:]
 
 
-# class loggers():
-
-#     _default_log_format = "%(levelname)s:%(asctime)s:%(module)s: %(message)s"
-#     _log_level = logging.INFO
-#     _stream_handler = logging.StreamHandler(stream=sys.stdout)
-
-#     root = None
-#     operations = None
-#     utils = None
-
-#     @classmethod
-#     def initialize(cls):
-#         opts = Options()
-#         if opts.debug:
-#             cls._log_level = logging.DEBUG
-
-#         log_dir = opts.output_dir.parent / "logs"
-#         log_dir.mkdir(parents=True, exist_ok=True)
-
-#         log_path = log_dir / f"{opts.file_name_base}_desc-{datetime.datetime.now().strftime('%m-%d-%y_%I-%M%p')}{opts.custom_desc}.log"
-#         cls._file_handler = logging.FileHandler(log_path)
-
-#         logging.basicConfig(level=cls._log_level,
-#                     handlers=[
-#                         cls._stream_handler,
-#                         cls._file_handler
-#                     ],
-#                     format=cls._default_log_format)
-
-#         cls.root = logging.getLogger()
-#         cls.operations = logging.getLogger("first_level.operations")
-#         cls.utils = logging.getLogger("first_level.utils")

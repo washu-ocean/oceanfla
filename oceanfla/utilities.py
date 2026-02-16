@@ -4,18 +4,14 @@ import nibabel as nib
 import nilearn.masking as nmask
 import numpy as np
 import bids
-from bids.layout.utils import PaddedInt
 import os
 import json
 import logging
 import sys
 from collections.abc import Iterable
-import time
-import stat
 from oceanfla.config import finish_logging
 
 logger = logging.getLogger("nipype.utils")
-# from bids.layout.writing import build_path
 
 cifti_files = [
     ".dtseries.nii",
@@ -24,9 +20,13 @@ cifti_files = [
     ".pscalar.nii",
 ]
 
+def find_subjects(layout:bids.BIDSLayout):
+    pass
+
 
 # Grab BOLD files from the preprocessed outputs, and list the runs and file extension for each 'func_space' in the files. 
-def parse_session_bold_files(layout:bids.BIDSLayout, subject:str, session:str, tasks:list[str]):
+
+def parse_session_bold_files(layout:bids.BIDSLayout, subject:str, session:str, tasks:list[str], brain_mask=None):
     '''
     Finds all BOLD files in the given BIDSLayout, with the given filters, and 
     returns a dictionary with organization {SPACE : {"runs" : {TASK : list[RUN#]}, "extension" : [FILE-EXTENSION] }} 
@@ -55,18 +55,17 @@ def parse_session_bold_files(layout:bids.BIDSLayout, subject:str, session:str, t
     files = layout.get(subject=subject, session=session, task=tasks, suffix="bold", datatype="func", extension=[".nii",".nii.gz",".dtseries.nii"])
     space_run_dict = dict()
     for f in files:
-        run = f.entities["run"] if "run" in f.entities else PaddedInt('01')
+        # get entities
+        # run = f.entities["run"] if "run" in f.entities else PaddedInt('01')
         space = f.entities["space"] if "space" in f.entities else "func"
         task = f.entities["task"]
         if space in space_run_dict:
-            if task in space_run_dict[space]["runs"]:
-                space_run_dict[space]["runs"][task].append(run)
+            if task in space_run_dict[space]:
+                space_run_dict[space][task].append(f.path)
             else:
-                space_run_dict[space]["runs"][task] = [run]
+                space_run_dict[space][task] = [f.path]
         else:
-            space_run_dict[space] = {}
-            space_run_dict[space]["extension"] = f.entities["extension"]
-            space_run_dict[space]["runs"] = {task:[run]}
+            space_run_dict[space] = {task:[f.path]}
     return space_run_dict
 
 
@@ -399,34 +398,24 @@ def export_args_to_file(args,
             for k,v in opts_to_save.items():
                 f.write(f"{k}{make_option(value=v)}\n")
 
-# def exit_program_early(msg:str, 
-#                        exit_func=None):
-#     """
-#     Exit the program while printing parameter 'msg'. If an exit
-#     function is sepcified, it will be called before the program
-#     exits
 
-#     :param msg: error message to display.
-#     :type msg: str
-#     :param exit_func: function to be called before program exit (no required arguments)
-#     :type exit_func: function
+def prompt_user_continue(msg:str) -> bool:
+    """
+    Prompt the user to continue with a custom message.
 
-#     """
-#     log_linebreak()
-#     logger.error(f"---[ERROR]: {msg} \nExiting the program now...\n")
-#     if exit_func and callable(exit_func):
-#         exit_func()
-#     sys.exit(1)
+    :param msg: prompt message to display.
+    :type msg: str
+
+    """
+    prompt_msg = f"{msg} \n\t---(press 'y' for yes, other input will mean no)"
+    user_continue = input(prompt_msg + "\n")
+    ans = (user_continue.lower() == "y")
+    logger.debug(f"User Prompt: {prompt_msg}")
+    logger.debug(f"User Response:  {user_continue} ({ans})")
+    return ans
 
 
-# def rmtree_error_callback(func, path, exc_info):
-#     if Path(path).exists():
-#         time.sleep(0.5)
-#         print("sleeping")
-#     shutil.rmtree(path)
-
-
-def clean_paths(path_list:list):
+def clean_paths(path_list):
     all_good = True
     for p in path_list:
         path = Path(p)
@@ -461,6 +450,5 @@ def logger_exception_hook(exctype, value, traceback):
         print("An unexpected error occured with the logging :(")
     finally:
         finish_logging()
-
 
 sys.excepthook = logger_exception_hook
