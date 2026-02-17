@@ -120,9 +120,9 @@ def _build_parser():
     session_arguments.add_argument("--session", "-se", required=False,
                                    help="The session ID")
 
-    session_arguments.add_argument("--events_long", "-el", type=ExistingDir, nargs="?", const=lambda a: a.derivs_dir / a.preproc_subfolder,
-                                   help="""Path to the directory containing long formatted event files to use. 
-                                   Default is the derivatives directory containing preprocessed outputs.""")
+    # session_arguments.add_argument("--events_long", "-el", type=ExistingDir, nargs="?", const=lambda a: a.derivs_dir / a.preproc_subfolder,
+    #                                help="""Path to the directory containing long formatted event files to use. 
+    #                                Default is the derivatives directory containing preprocessed outputs.""")
 
     session_arguments.add_argument("--export_args", "-ea", type=ParentExists,
                                    help="Path to a file to save the current arguments.")
@@ -224,9 +224,9 @@ def _build_parser():
     config_arguments.add_argument("--repetition_time", "-tr", type=AboveZeroFloat,
                                   help="Repetition time of the function runs in seconds. If it is not supplied, an attempt will be made to read it from the JSON sidecar file.")
 
-    config_arguments.add_argument("--detrend_data", "-dd", action="store_true",
-                                  help="""Flag to demean and detrend the data before modeling. The default is to include 
-                                  a mean and trend line into the nuisance matrix instead.""")
+    # config_arguments.add_argument("--detrend_data", "-dd", action="store_true",
+    #                               help="""Flag to demean and detrend the data before modeling. The default is to include 
+    #                               a mean and trend line into the nuisance matrix instead.""")
 
     config_arguments.add_argument("--percent_change", "-pc", action="store_true",
                                   help="""Flag to convert data to percent signal change.""")
@@ -257,8 +257,8 @@ def _build_parser():
                                   help="""List of variables to include in nuisance regression before the performing the GLM for event-related activation. If no values are specified then
                                   all nuisance/confound variables will be included""")
 
-    config_arguments.add_argument("--nuisance_fd", "-nf", type=PositiveFloat,
-                                  help="The framewise displacement threshold used when censoring frames for nuisance regression.")
+    # config_arguments.add_argument("--nuisance_fd", "-nf", type=PositiveFloat,
+    #                               help="The framewise displacement threshold used when censoring frames for nuisance regression.")
 
     config_arguments.add_argument("--highpass", "-hp", type=AboveZeroFloat, nargs="?", const=0.008,
                                   help="""The high pass cutoff frequency for signal filtering. Frequencies below this value (Hz) will be filtered out. If the argument 
