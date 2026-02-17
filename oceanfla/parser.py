@@ -331,8 +331,8 @@ def parse_args():
         parser.error(
             "The options '--volterra_lag' and '--volterra_columns' must be specifed together, or neither of them specified.")
 
-    if callable(args.events_long):
-        args.events_long = args.events_long(args)
+    # if callable(args.events_long):
+    #     args.events_long = args.events_long(args)
 
     if args.group:
         for regroup in args.group:
