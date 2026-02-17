@@ -8,7 +8,7 @@ from oceanfla.interfaces.clean import FilterData, PercentChange
 from oceanfla.interfaces.events import EventsMatrix, ModifyEventsFile, get_number_of_volumes
 from oceanfla.interfaces.exclusions import CheckRunRetention, CheckRuntSNR
 from oceanfla.interfaces.nuisance import GenerateNuisanceMatrix
-from oceanfla.interfaces.regression import ConcatRegressionData, MakeRunDesign, RunGLMRegression
+from oceanfla.interfaces.regression import CombineFIRBetas, ConcatRegressionData, MakeRunDesign, RunGLMRegression
 from oceanfla.interfaces.tmask import MakeTmask, MakeTmaskTsv
 from oceanfla.interfaces.utility import MergeUnique, ExtractDataGroup
 from oceanfla.config import all_opts, get_bids_file, get_logger
@@ -663,6 +663,7 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
         ])
     ])
 
+
     ### Datasink for user outputs ###
     bold_runs_list = [bf for bold_list in run_map.values() for bf in bold_list]
     need_compress = file_extension.endswith(".gz")
@@ -688,6 +689,43 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
             ("outputnode.execute", "execute")
         ])
     ])
+
+    if all_opts.fir:
+        combine_fir_betas_node = Node(
+            CombineFIRBetas(
+                brain_mask=all_opts.brain_mask
+            ),
+            name=f"{func_space}_combine_fir_betas_node"
+        )
+        combo_beta_weights_ds = Node(
+            FLADataSink(
+                base_directory=all_opts.datasink_path.parent,
+                out_path_base=all_opts.datasink_path.name,
+                compress=need_compress,
+                extra_bids_patterns=all_opts.bids_patterns,
+                dismiss_entities=["desc", "run", "den"],
+                suffix="boldmap",
+                stat="effect",
+                task=all_opts.combined_task_name,
+                allowed_entities=("condition", "stat"),
+                source_file=bold_runs_list
+            ),
+            name=f"{func_space}_fir_combo_beta_weights_ds"
+        )
+        workflow.connect([
+            (regression_wf, combine_fir_betas_node, [
+                ("outputnode.beta_files", "beta_files"),
+                ("outputnode.beta_labels", "beta_labels"),
+                ("outputnode.execute", "execute")
+            ]),
+            (combine_fir_betas_node, combo_beta_weights_ds, [
+                ("beta_files", "in_file"),
+                ("beta_labels", "condition"),
+            ]),
+            (regression_wf, combo_beta_weights_ds, [
+                ("outputnode.execute", "execute")
+            ])
+        ])
 
     residual_bold_ds = Node(
         FLADataSink(
@@ -1115,9 +1153,9 @@ def build_regression_workflow(tasks, run=None, regression_columns=None, need_int
             ("execute", "execute")
         ]),
         (glm_node, outputnode, [
+            ("residual_bold_file", "bold_file"),
             ("beta_files", "beta_files"),
             ("beta_labels", "beta_labels"),
-            ("residual_bold_file", "bold_file")
         ])
     ])
 
@@ -1126,6 +1164,34 @@ def build_regression_workflow(tasks, run=None, regression_columns=None, need_int
                          concat_data_node, "tmask_files_in")
     else:
         concat_data_node.inputs.tmask_files_in = None
+
+    # if all_opts.fir:
+    #     combine_fir_betas_node = Node(
+    #         CombineFIRBetas(
+    #             brain_mask=all_opts.brain_mask
+    #         ),
+    #         name="combine_fir_betas_node"
+    #     )
+    #     workflow.connect([
+    #         (glm_node, combine_fir_betas_node, [
+    #             ("beta_files", "beta_files"),
+    #             ("beta_labels", "beta_labels")
+    #         ]),
+    #         (concat_data_node, combine_fir_betas_node, [
+    #             ("execute", "execute")
+    #         ]),
+    #         (combine_fir_betas_node, outputnode, [
+    #             ("beta_files", "beta_files"),
+    #             ("beta_labels", "beta_labels"),
+    #         ])
+    #     ])
+    # else:
+    #     workflow.connect([
+    #         (glm_node, outputnode, [
+    #             ("beta_files", "beta_files"),
+    #             ("beta_labels", "beta_labels"),
+    #         ])
+    #     ])
 
     return workflow
 

@@ -231,7 +231,7 @@ def massuni_linGLM(func_file: str,
             data=(beta_data[i])[np.newaxis, :],
             source_header=func_file,
             out_file=beta_filename,
-            dscalar_axis=[f"beta-{beta_label}"],
+            scalar_axis=[f"beta-{beta_label}"],
             brain_mask=brain_mask
         )
         beta_files.append(beta_filename)
@@ -427,3 +427,96 @@ def make_run_design_files(event_matrix: str,
     nuisance_design.to_csv(nuisance_design_file, sep="\t", index=False)
 
     return main_design_file, nuisance_design_file
+
+
+class CombineFIRBetasInputSpec(OptionalInterfaceSpec):
+    beta_files = traits.List(
+        trait=traits.File(exists=True),
+        desc=""
+    )
+    beta_labels = traits.List(
+        trait=traits.Str,
+        desc=""
+    )
+    brain_mask = traits.Union(
+        traits.File(exists=True),
+        None,
+        default_value=None,
+        usedefault=True,
+        desc="The brain mask that accompanies volumetric data"
+    )
+
+
+class CombineFIRBetasOutputSpec(OptionalInterfaceSpec):
+    beta_files = traits.List(
+        trait=traits.File(exists=True),
+        desc=""
+    )
+    beta_labels = traits.List(
+        trait=traits.Str,
+        desc=""
+    )
+
+
+class CombineFIRBetas(OptionalInterface):
+    input_spec = CombineFIRBetasInputSpec
+    output_spec = CombineFIRBetasOutputSpec
+
+    def _run_interface(self, runtime):
+
+        self._results["beta_files"], self._results["beta_labels"] = combine_fir_betas(
+            beta_files=self.inputs.beta_files,
+            beta_labels=self.inputs.beta_labels,
+            brain_mask=self.inputs.brain_mask
+        )
+
+        return runtime
+    
+
+def combine_fir_betas(beta_files: list[str],
+                      beta_labels: list[str],
+                      brain_mask: str = None):
+    import numpy as np
+    from oceanfla.utilities import replace_entities, load_data, create_image_like, is_cifti_file
+    from bids.layout import parse_file_entities
+    
+    label_file_map = {blabel: beta_files[i] for i, blabel in enumerate(beta_labels)}
+    
+    combo_label_file_map = {}
+    for blabel in beta_labels:
+        blabel_split = blabel.rsplit("-",1)
+        if len(blabel_split) != 2:
+            continue
+        condition, fir_num = blabel_split[0], blabel_split[1]
+        if fir_num.isnumeric() and len(fir_num)==2:
+            if condition in combo_label_file_map:
+                combo_label_file_map[condition].append(blabel)
+            else:
+                combo_label_file_map[condition] = [blabel]
+
+    
+    combo_beta_files, combo_beta_labels = [], []
+
+    for condition, label_list in combo_label_file_map.items():
+        sorted_bfiles = [label_file_map[blabel] for blabel in sorted(label_list, key=lambda x: int(x.rsplit("-",1)[-1]))]
+        combined_beta_data = np.array([load_data(bf, brain_mask=brain_mask)[0,:] for bf in sorted_bfiles])
+        new_entities = {"path":None, "beta":condition}
+        if is_cifti_file(sorted_bfiles[0]):
+            old_ext = parse_file_entities(sorted_bfiles[0])["extension"]
+            new_entities["ext"] = old_ext.replace("scalar", "tseries")
+        new_beta_file = replace_entities(
+            file=sorted_bfiles[0],
+            entities=new_entities
+        )
+        # scalar_axis_labels = ["fir-" + blabel.rsplit("-",1)[-1] for blabel in sorted(label_list, key=lambda x: int(x.rsplit("-",1)[-1]))]
+        create_image_like(
+            data=combined_beta_data,
+            out_file=new_beta_file,
+            source_header=sorted_bfiles[0],
+            # scalar_axis=scalar_axis_labels,
+            brain_mask=brain_mask
+        )
+        combo_beta_files.append(new_beta_file)
+        combo_beta_labels.append(condition)
+
+    return combo_beta_files, combo_beta_labels

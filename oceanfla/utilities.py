@@ -150,7 +150,7 @@ def is_nifti_file(file: str|Path) -> str|None:
 def create_image_like(data: np.ndarray,
                  out_file: str|Path,
                  source_header = None,
-                 dscalar_axis:list[str] = None,
+                 scalar_axis:list[str] = None,
                  brain_mask: str = None):
     
     """
@@ -165,7 +165,7 @@ def create_image_like(data: np.ndarray,
         for the output image structure.
     out_file : str | Path
         The output file path where the NIFTI or CIFTI image will be saved.
-    dscalar_axis : list[str], optional
+    scalar_axis : list[str], optional
         A list of scalar axis names. If provided, creates a ScalarAxis with these names.
         If not provided, creates a SeriesAxis based on the source header. Default is None.
     brain_mask : str, optional
@@ -188,7 +188,7 @@ def create_image_like(data: np.ndarray,
     - If brain_mask is provided, the function bypasses CIFTI image creation and
         uses nibabel's unmask function to create a volumetric NIFTI.
     - The output CIFTI image uses either a ScalarAxis or SeriesAxis for the first
-        dimension, depending on whether dscalar_axis is provided.
+        dimension, depending on whether scalar_axis is provided.
     """
 
     data_img = None
@@ -199,10 +199,11 @@ def create_image_like(data: np.ndarray,
             wrong_type = False
         if isinstance(source_header, nib.cifti2.cifti2.Cifti2Header):
             wrong_type = False
+            step_size = getattr(source_header.get_axis(0), "step") if hasattr(source_header.get_axis(0), "step") else 1
             ax0 = ( 
-                nib.cifti2.cifti2_axes.ScalarAxis(name=dscalar_axis) 
-                    ) if  dscalar_axis else (
-                nib.cifti2.cifti2_axes.SeriesAxis(start=0, step=source_header.get_axis(0).step, size=data.shape[0]) 
+                nib.cifti2.cifti2_axes.ScalarAxis(name=scalar_axis) 
+                    ) if  scalar_axis else (
+                nib.cifti2.cifti2_axes.SeriesAxis(start=0, step=step_size, size=data.shape[0]) 
                 )
             
             data_img = nib.cifti2.cifti2.Cifti2Image(data, (ax0, source_header.get_axis(1)))
