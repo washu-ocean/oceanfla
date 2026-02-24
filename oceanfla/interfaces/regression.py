@@ -229,7 +229,7 @@ def massuni_linGLM(func_file: str,
         )
         create_image_like(
             data=(beta_data[i])[np.newaxis, :],
-            source_header=func_file,
+            source_img=func_file,
             out_file=beta_filename,
             scalar_axis=[f"beta-{beta_label}"],
             brain_mask=brain_mask
@@ -244,7 +244,7 @@ def massuni_linGLM(func_file: str,
     )
     create_image_like(
         data=resids,
-        source_header=func_file,
+        source_img=func_file,
         out_file=residual_filename,
         brain_mask=brain_mask
     )
@@ -300,7 +300,7 @@ def combine_regression_data(tasks: list,
     )
     create_image_like(
         data=np.concatenate(func_data_list, axis=0),
-        source_header=func_list[0],
+        source_img=func_list[0],
         out_file=final_func_file,
         brain_mask=brain_mask)
     res_list.append(final_func_file)
@@ -512,7 +512,7 @@ def combine_fir_betas(beta_files: list[str],
         create_image_like(
             data=combined_beta_data,
             out_file=new_beta_file,
-            source_header=sorted_bfiles[0],
+            source_img=sorted_bfiles[0],
             # scalar_axis=scalar_axis_labels,
             brain_mask=brain_mask
         )
