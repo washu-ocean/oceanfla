@@ -75,6 +75,68 @@ def parse_session_bold_files(layout:bids.BIDSLayout, subject:str, session:str, t
     return space_run_dict
 
 
+def get_standard_mask_for_func_data(func_file: str | Path | bids.layout.BIDSFile) -> nib.Nifti1Image:
+    '''
+    If a functional run is in a standard space (i.e. not fsnative, T1w, or T2w space),
+    return the closest-resolution mask for the space on TemplateFlow and resample it to match
+    the pixel dimensions and shape of the functional run.
+
+    Parameters
+    ----------
+    func_file: str|Path|bids.layout.BIDSFile
+        The path to a BOLD NIFTI or CIFTI file
+
+    Returns
+    -------
+    nib.Nifti1Image
+        A NIFTI corresponding to the resampled mask
+    '''
+    if isinstance(func_file, bids.layout.BIDSFile):
+        func_file = str(func_file.path)
+    elif not isinstance(func_file, str):
+        func_file = str(func_file)
+    logger.info(f"Attempting to mask {func_file}")
+    func_img = nib.load(func_file)
+    func_space = re.search(r'space-([a-zA-Z0-9]+)', func_file).group(1)
+    if func_space in NONSTANDARD_REFERENCES:
+        raise RuntimeError(f'Volumetric data in nonstandard space {func_space} '
+                           'must use an accompanying brain mask.')
+    res_search = re.search(r'res-(\d+)', func_file)
+    if res_search is not None:
+        mask_img = nib.load(mask_path := next(tflow.get(
+            func_space,
+            desc="brain",
+            suffix="mask",
+            resolution=int(res_search.group(1))
+        )))
+        if mask_img.shape[:3] == func_img.shape[:3] and np.isclose(mask_img.affine, func_img.affine):
+            logger.info(f"TemplateFlow mask {mask_img} works well!")
+            return nmask.apply_mask(func_img, mask_img)
+    logger.info(f"Finding closest-resolution {func_space} mask to resample into native resolution...")
+    func_res = func_img.header.get("pixdim")[1:4]
+    mask_paths = tflow.get(
+        func_space,
+        desc="brain",
+        suffix="mask"
+    )
+    if len(mask_paths) == 0:
+        raise RuntimeError(f"Could not find a TemplateFlow brain mask for {func_space}.")
+    closest_res, closest_res_path = np.inf, None
+    for mask_path in mask_paths:
+        mask_res = nib.load(mask_path).header.get("pixdim")[1:4]
+        if np.sum(func_res - mask_res) < closest_res:
+            closest_res = np.sum(func_res - mask_res)
+            closest_res_path = mask_path
+    logger.info(f"Masking by resampling {closest_res_path}\nto BOLD res {'{:.2f}mm X {:.2f}mm X {:.2f}mm'.format(*func_res)}")
+    matched_res_mask = resample_img(
+        nib.load(closest_res_path),
+        target_affine=func_img.affine,
+        target_shape=func_img.shape[:3],
+        interpolation="nearest"
+    )
+    return nmask.apply_mask(func_img, matched_res_mask)
+
+
 def load_data(func_file: str | Path | bids.layout.BIDSFile,
               brain_mask: str | Path | None) -> np.ndarray:
     '''
@@ -107,31 +169,7 @@ def load_data(func_file: str | Path | bids.layout.BIDSFile,
         if brain_mask is not None:
             return nmask.apply_mask(func_img, brain_mask)
         else:
-            func_space = re.search(r'space-([a-zA-Z0-9]+)', func_file).group(1)
-            if func_space in NONSTANDARD_REFERENCES:
-                raise RuntimeError(f'Volumetric data in nonstandard space {func_space} '
-                                   'must use an accompanying brain mask.')
-            func_res = func_img.header.get("pixdim")[1:4]
-            mask_paths = tflow.get(
-                func_space,
-                desc="brain",
-                suffix="mask"
-            )
-            if len(mask_paths) == 0:
-                raise RuntimeError(f"Could not find a TemplateFlow brain mask for {func_space}.")
-            closest_res, closest_res_path = np.inf, None
-            for mask_path in mask_paths:
-                mask_res = nib.load(mask_path).header.get("pixdim")[1:4]
-                if np.sum(func_res - mask_res) < closest_res:
-                    closest_res = np.sum(func_res - mask_res)
-                    closest_res_path = mask_path
-            matched_res_mask = resample_img(
-                nib.load(closest_res_path),
-                target_affine=func_img.affine,
-                target_shape=func_img.shape[:3],
-                interpolation="nearest"
-            )
-            return nmask.apply_mask(func_img, matched_res_mask)
+            return get_standard_mask_for_func_data(func_file)
             # raise RuntimeError("Volumetric data must also have an accompanying brain mask")
 
 
