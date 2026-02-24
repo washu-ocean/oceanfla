@@ -145,7 +145,9 @@ def _build_parser():
     config_arguments.add_argument("--brain_mask", "-bm", type=ExistingFile,
                                   help="If the bold file type is volumetric data, a brain mask must also be supplied.")
 
-    config_arguments.add_argument("--func_space", default="fsLR", required=True,
+    config_arguments.add_argument("--template_space", "--func_space",
+                                  dest="func_space",
+                                  default="fsLR", required=True,
                                   help="Space that the preprocessed data should be in (for example, 'T2w', 'MNIInfant', etc.)")
 
     config_arguments.add_argument("--fwhm", type=AboveZeroFloat,
