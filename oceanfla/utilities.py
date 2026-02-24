@@ -34,8 +34,8 @@ def find_subjects(layout:bids.BIDSLayout):
 
 def parse_session_bold_files(layout:bids.BIDSLayout, subject:str, session:str, tasks:list[str], brain_mask=None):
     '''
-    Finds all BOLD files in the given BIDSLayout, with the given filters, and 
-    returns a dictionary with organization {SPACE : {"runs" : {TASK : list[RUN#]}, "extension" : [FILE-EXTENSION] }} 
+    Finds all BOLD files in the given BIDSLayout, with the given filters, and
+    returns a dictionary with organization {SPACE : {"runs" : {TASK : list[RUN#]}, "extension" : [FILE-EXTENSION] }}
 
     Parameters
     ----------
@@ -111,7 +111,8 @@ def get_standard_mask_for_func_data(func_file: str | Path | bids.layout.BIDSFile
         )))
         if mask_img.shape[:3] == func_img.shape[:3] and np.isclose(mask_img.affine, func_img.affine):
             logger.info(f"TemplateFlow mask {mask_img} works well!")
-            return nmask.apply_mask(func_img, mask_img)
+            return mask_img
+            # return nmask.apply_mask(func_img, mask_img)
     logger.info(f"Finding closest-resolution {func_space} mask to resample into native resolution...")
     func_res = func_img.header.get("pixdim")[1:4]
     mask_paths = tflow.get(
@@ -134,7 +135,8 @@ def get_standard_mask_for_func_data(func_file: str | Path | bids.layout.BIDSFile
         target_shape=func_img.shape[:3],
         interpolation="nearest"
     )
-    return nmask.apply_mask(func_img, matched_res_mask)
+    return matched_res_mask
+    # return nmask.apply_mask(func_img, matched_res_mask)
 
 
 def load_data(func_file: str | Path | bids.layout.BIDSFile,
@@ -169,8 +171,7 @@ def load_data(func_file: str | Path | bids.layout.BIDSFile,
         if brain_mask is not None:
             return nmask.apply_mask(func_img, brain_mask)
         else:
-            return get_standard_mask_for_func_data(func_file)
-            # raise RuntimeError("Volumetric data must also have an accompanying brain mask")
+            return nmask.apply_mask(func_img, get_standard_mask_for_func_data(func_file))
 
 
 def is_cifti_file(file: str | Path) -> str | None:
@@ -218,7 +219,7 @@ def is_nifti_file(file: str | Path) -> str | None:
 
 def create_image_like(data: np.ndarray,
                       out_file: str | Path,
-                      source_header=None,
+                      source_img=None,
                       scalar_axis:list[str] = None,
                       brain_mask: str = None):
     """
@@ -229,7 +230,7 @@ def create_image_like(data: np.ndarray,
     data : np.ndarray
         A numpy array representing the image data to be saved.
     source_header : str | Path | nibabel.cifti2.cifti2.Cifti2Header
-        The path to a CIFTI file or a Cifti2Header object to use as a template
+        The path to the original BOLD file to use as a template
         for the output image structure.
     out_file : str | Path
         The output file path where the NIFTI or CIFTI image will be saved.
@@ -259,33 +260,27 @@ def create_image_like(data: np.ndarray,
         dimension, depending on whether scalar_axis is provided.
     """
 
-    data_img = None
-    if source_header:
-        wrong_type = True
-        if isinstance(source_header, str) or isinstance(source_header, Path):
-            source_header = nib.load(source_header).header
-            wrong_type = False
-        if isinstance(source_header, nib.cifti2.cifti2.Cifti2Header):
-            wrong_type = False
-            step_size = getattr(source_header.get_axis(0), "step") if hasattr(source_header.get_axis(0), "step") else 1
-            ax0 = (
-                nib.cifti2.cifti2_axes.ScalarAxis(name=scalar_axis)
-            ) if scalar_axis else (
-                nib.cifti2.cifti2_axes.SeriesAxis(start=0, step=step_size, size=data.shape[0])
-            )
+    data_img, source_path = None, None
+    if isinstance(source_img, str) or isinstance(source_img, Path):
+        source_path = source_img
+        source_img = nib.load(source_img)
+    if isinstance(source_img, nib.cifti2.cifti2.Cifti2Image):
+        step_size = getattr(source_img.header.get_axis(0), "step") if hasattr(source_img.header.get_axis(0), "step") else 1
+        ax0 = (
+            nib.cifti2.cifti2_axes.ScalarAxis(name=scalar_axis)
+        ) if scalar_axis else (
+            nib.cifti2.cifti2_axes.SeriesAxis(start=0, step=step_size, size=data.shape[0])
+        )
 
-            data_img = nib.cifti2.cifti2.Cifti2Image(data, (ax0, source_header.get_axis(1)))
-        if wrong_type:
-            raise ValueError("source_header must be one of the following types: [str, pathlib.Path, nibabel.cifti2.cifti2.Cifti2Header]")
-
-    if brain_mask and data_img is None:
-        data_img = nmask.unmask(data, brain_mask)
-
-    if data_img is None:
-        raise ValueError("Must supply either the brain_mask argument (for NIFTI) or an accepted source_header argument (for CIFTI), but neither were found")
-
+        data_img = nib.cifti2.cifti2.Cifti2Image(data, (ax0, source_img.header.get_axis(1)))
+    elif isinstance(source_img, nib.Nifti1Image):
+        if brain_mask and data_img is None:
+            data_img = nmask.unmask(data, brain_mask)
+        else:
+            data_img = nmask.unmask(data, get_standard_mask_for_func_data(source_path))
+    else:
+        raise ValueError(f"source_img should point to either a NIFTI/CIFTI filepath or img object, but was of type {type(source_img)}")
     nib.save(data_img, out_file)
-    return
 
 
 def replace_entities(file:str, entities:dict):
