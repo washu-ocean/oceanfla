@@ -56,14 +56,10 @@ def build_oceanfla_wf(subjects: list[str] | str | None, base_dir=Path | str):
     tasks = all_opts.task
     wf_name = f"oceanfla_tasks_{all_opts.combined_task_name}_wf"
     fla_wf = Workflow(name=wf_name, base_dir=base_dir)
-    # breakpoint()
+
     subject_list = listify(subjects)
     if not subject_list:
         subject_list = sorted([d.name.split("sub-")[-1] for d in Path(all_opts.preproc_layout.root).glob("sub-*") if d.is_dir()])
-        # subject_list = collect_participants(
-        #     bids_dir=all_opts.preproc_layout,
-        #     participant_label=subject_list
-        # )
 
     start_node = Node(
         IdentityInterface(
@@ -73,6 +69,7 @@ def build_oceanfla_wf(subjects: list[str] | str | None, base_dir=Path | str):
     )
     start_node.inputs.task = tasks
 
+    nothing_to_do = True
     for sub in subject_list:
         sessions = [None]
         if all_opts.session:
@@ -85,11 +82,17 @@ def build_oceanfla_wf(subjects: list[str] | str | None, base_dir=Path | str):
         for ses in sessions:
             ses_wf = build_session_wf(subject=sub,
                                       session=ses)
-            fla_wf.connect([
-                (start_node, ses_wf, [
-                    ("task", "inputnode.task")
+            if ses_wf:
+                fla_wf.connect([
+                    (start_node, ses_wf, [
+                        ("task", "inputnode.task")
+                    ])
                 ])
-            ])
+                nothing_to_do = False
+    
+    if nothing_to_do:
+        logger.warning("NO WORKFLOWS WERE CREATED, EXITING NOW")
+        return None
 
     return fla_wf
 
@@ -117,10 +120,10 @@ def build_session_wf(subject, session=None):
                                               subject=subject,
                                               session=session,
                                               tasks=all_opts.task)
+    
     if all_opts.func_space not in space_run_info:
-        do_nothing_node = Node(IdentityInterface(fields=["end"]), name="do_nothing_node")
-        workflow.connect([(inputnode, do_nothing_node, [("subject", "end")])])
-        return workflow
+        logger.warning(f"NO BOLD RUNS FOUND FOR SUBJECT:{subject}, SESSION:{session}, TEMPLATE_SPACE:{all_opts.func_space}")
+        return None
     
     confounds_grabber = Node(
         BIDSDataGrabber(

@@ -83,14 +83,6 @@ def _build_parser():
             )
         return i_val
 
-    def ZeroOrAboveInt(val):
-        i_val = PositiveInt(val)
-        if i_val < 0:
-            raise argparse.ArgumentTypeError(
-                f"The value(s) supplied must be greater than zero: {val}"
-            )
-        return i_val
-
     def PositiveFloat(val):
         return PositiveVal(val, float)
 
@@ -225,7 +217,7 @@ def _build_parser():
     config_arguments.add_argument("--fd_threshold", "-fd", type=PositiveFloat, default=0.9,
                                   help="The framewise displacement threshold used when censoring high-motion frames")
 
-    config_arguments.add_argument("--minimum_unmasked_neighbors", "-mun", type=ZeroOrAboveInt, default=0,
+    config_arguments.add_argument("--minimum_unmasked_neighbors", "-mun", type=PositiveInt, default=0,
                                   help="Minimum number of contiguous unmasked frames on either side of a given frame that's required to be under the fd_threshold; any unmasked frame without the required number of neighbors will be masked.")
 
     config_arguments.add_argument("--tmask", action=argparse.BooleanOptionalAction,
