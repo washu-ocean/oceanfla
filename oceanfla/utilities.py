@@ -128,6 +128,7 @@ def load_data(func_file: str | Path | bids.layout.BIDSFile,
             matched_res_mask = resample_img(
                 nib.load(closest_res_path),
                 target_affine=func_img.affine,
+                target_shape=func_img.shape[:3],
                 interpolation="nearest"
             )
             return nmask.apply_mask(func_img, matched_res_mask)
