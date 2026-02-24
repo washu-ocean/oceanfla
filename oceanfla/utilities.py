@@ -284,30 +284,30 @@ def replace_entity(file: str, entity: str, value: str) -> str:
     "prefix_type-newvalue_suffix.txt"
     """
 
+    file_path = Path(file)
+    parent, file = file_path.parent, file_path.name
     if entity == "suffix":
         prefix, suffix = file.rsplit("_", 1)
         ext = suffix.split(".",1)[-1]
-        return f"{prefix}_{value}.{ext}"
-    
-    if entity == "ext":
-        return f"{file.split('.',1)[0]}{value}"
-    
-    if entity == "path":
-        fname=Path(file).name
+        file = f"{prefix}_{value}.{ext}"
+    elif entity == "ext":
+        file = f"{file.split('.',1)[0]}{value}"
+    elif entity == "path":
         if not value:
-            return str(Path().resolve()/fname)
+            parent = Path().resolve()
         else:
-            return f"{value}/{fname}"
-    
-    entity_label = f"_{entity}-"
-    if entity_label in file:
-        prefix, suffix = file.split(entity_label, 1)
-        suffix = suffix.split("_",1)[-1]
-        if value is None:
-            return f"{prefix}_{suffix}"
-        return f"{prefix}{entity_label}{value}_{suffix}"
+            parent = Path(value).resolve()
+    else:
+        entity_label = f"_{entity}-"
+        if entity_label in file:
+            prefix, suffix = file.split(entity_label, 1)
+            suffix = suffix.split("_",1)[-1]
+            if value is None:
+                file = f"{prefix}_{suffix}"
+            else:
+                file = f"{prefix}{entity_label}{value}_{suffix}"
 
-    return file
+    return str(parent/file)
 
 
 def make_option(value, 
