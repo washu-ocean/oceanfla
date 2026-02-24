@@ -61,7 +61,7 @@ def _build_parser():
         elif isinstance(val, str):
             try:
                 out = dtype(val)
-                valid = (out > 0)
+                valid = (out >= 0)
             except:
                 valid = False
         else:
