@@ -1,11 +1,12 @@
 import argparse
 from pathlib import Path
 from textwrap import dedent
-from oceanfla.oceanparse import OceanParser
-from oceanfla.utilities import export_args_to_file
 import logging
 import bids
 from datetime import datetime
+
+from oceanfla.oceanparse import OceanParser
+from oceanfla.utilities import export_args_to_file
 
 VERSION = "1.1.4"
 

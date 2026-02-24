@@ -2,14 +2,19 @@ from pathlib import Path
 import shutil
 import nibabel as nib
 import nilearn.masking as nmask
+from nilearn.image import resample_img
 import numpy as np
 import bids
 import os
 import json
 import logging
 import sys
+import re
 from collections.abc import Iterable
 from oceanfla.config import finish_logging
+
+from niworkflows.utils.spaces import NONSTANDARD_REFERENCES
+from templateflow import api as tflow
 
 logger = logging.getLogger("nipype.utils")
 
@@ -20,11 +25,12 @@ cifti_files = [
     ".pscalar.nii",
 ]
 
+
 def find_subjects(layout:bids.BIDSLayout):
     pass
 
 
-# Grab BOLD files from the preprocessed outputs, and list the runs and file extension for each 'func_space' in the files. 
+# Grab BOLD files from the preprocessed outputs, and list the runs and file extension for each 'func_space' in the files.
 
 def parse_session_bold_files(layout:bids.BIDSLayout, subject:str, session:str, tasks:list[str], brain_mask=None):
     '''
@@ -38,19 +44,19 @@ def parse_session_bold_files(layout:bids.BIDSLayout, subject:str, session:str, t
 
     subject: str
         The BIDS subject ID to filter on
-    
+
     session: str
         The BIDS session ID to filter on
 
     tasks: list[str]
         A list of BIDS task IDs to filter on
-    
+
 
     Returns
     -------
     dict[str : dict[str : list] | list]
         A dictionary organizing BOLD run numbers by task and functional space
-    
+
     '''
     files = layout.get(subject=subject, session=session, task=tasks, suffix="bold", datatype="func", extension=[".nii",".nii.gz",".dtseries.nii"])
     space_run_dict = dict()
@@ -69,8 +75,8 @@ def parse_session_bold_files(layout:bids.BIDSLayout, subject:str, session:str, t
     return space_run_dict
 
 
-def load_data(func_file: str|Path|bids.layout.BIDSFile,
-              brain_mask: str|Path) -> np.ndarray:
+def load_data(func_file: str | Path | bids.layout.BIDSFile,
+              brain_mask: str | Path | None) -> np.ndarray:
     '''
     Loads NIFTI or CIFTI file data into an in-memory numpy array of
     of shape [volume/time, voxel/vertex #]. Volumetric NIFTI files must also have
@@ -88,23 +94,47 @@ def load_data(func_file: str|Path|bids.layout.BIDSFile,
     -------
     numpy.ndarray
         A numpy array representing the data in the input file
-    
+
     '''
     if isinstance(func_file, bids.layout.BIDSFile):
         func_file = str(func_file.path)
     elif not isinstance(func_file, str):
         func_file = str(func_file)
-    img = nib.load(func_file)
+    func_img = nib.load(func_file)
     if is_cifti_file(func_file):
-        return img.get_fdata()
+        return func_img.get_fdata()
     elif is_nifti_file(func_file):
-        if brain_mask:
-            return nmask.apply_mask(img, brain_mask)
+        if brain_mask is not None:
+            return nmask.apply_mask(func_img, brain_mask)
         else:
-            raise RuntimeError("Volumetric data must also have an accompanying brain mask")
-        
+            func_space = re.search(r'space-([a-zA-Z0-9]+)', func_file).group(1)
+            if func_space in NONSTANDARD_REFERENCES:
+                raise RuntimeError(f'Volumetric data in nonstandard space {func_space} '
+                                   'must use an accompanying brain mask.')
+            func_res = func_img.header.get("pixdim")[1:4]
+            mask_paths = tflow.get(
+                func_space,
+                desc="brain",
+                suffix="mask"
+            )
+            if len(mask_paths) == 0:
+                raise RuntimeError(f"Could not find a TemplateFlow brain mask for {func_space}.")
+            closest_res, closest_res_path = np.inf, None
+            for mask_path in mask_paths:
+                mask_res = nib.load(mask_path).header.get("pixdim")[1:4]
+                if np.sum(func_res - mask_res) < closest_res:
+                    closest_res = np.sum(func_res - mask_res)
+                    closest_res_path = mask_path
+            matched_res_mask = resample_img(
+                nib.load(closest_res_path),
+                target_affine=func_img.affine,
+                interpolation="nearest"
+            )
+            return nmask.apply_mask(func_img, matched_res_mask)
+            # raise RuntimeError("Volumetric data must also have an accompanying brain mask")
 
-def is_cifti_file(file: str|Path) -> str|None:
+
+def is_cifti_file(file: str | Path) -> str | None:
     '''
     Returns the CIFTI extention if the input path describes
     a CIFTI file, else None
@@ -125,7 +155,7 @@ def is_cifti_file(file: str|Path) -> str|None:
     return suffix[0] if len(suffix) > 0 else None
 
 
-def is_nifti_file(file: str|Path) -> str|None:
+def is_nifti_file(file: str | Path) -> str | None:
     '''
     Returns the NIFI extention if the input path describes
     a NIFTI file, else None
@@ -148,11 +178,10 @@ def is_nifti_file(file: str|Path) -> str|None:
 
 
 def create_image_like(data: np.ndarray,
-                 out_file: str|Path,
-                 source_header = None,
-                 scalar_axis:list[str] = None,
-                 brain_mask: str = None):
-    
+                      out_file: str | Path,
+                      source_header=None,
+                      scalar_axis:list[str] = None,
+                      brain_mask: str = None):
     """
     Create a NIFTI or CIFTI image file from data using a source header template.
 
@@ -200,22 +229,22 @@ def create_image_like(data: np.ndarray,
         if isinstance(source_header, nib.cifti2.cifti2.Cifti2Header):
             wrong_type = False
             step_size = getattr(source_header.get_axis(0), "step") if hasattr(source_header.get_axis(0), "step") else 1
-            ax0 = ( 
-                nib.cifti2.cifti2_axes.ScalarAxis(name=scalar_axis) 
-                    ) if  scalar_axis else (
-                nib.cifti2.cifti2_axes.SeriesAxis(start=0, step=step_size, size=data.shape[0]) 
-                )
-            
+            ax0 = (
+                nib.cifti2.cifti2_axes.ScalarAxis(name=scalar_axis)
+            ) if scalar_axis else (
+                nib.cifti2.cifti2_axes.SeriesAxis(start=0, step=step_size, size=data.shape[0])
+            )
+
             data_img = nib.cifti2.cifti2.Cifti2Image(data, (ax0, source_header.get_axis(1)))
         if wrong_type:
             raise ValueError("source_header must be one of the following types: [str, pathlib.Path, nibabel.cifti2.cifti2.Cifti2Header]")
-        
+
     if brain_mask and data_img is None:
         data_img = nmask.unmask(data, brain_mask)
-    
+
     if data_img is None:
         raise ValueError("Must supply either the brain_mask argument (for NIFTI) or an accepted source_header argument (for CIFTI), but neither were found")
-    
+
     nib.save(data_img, out_file)
     return
 
@@ -288,17 +317,17 @@ def replace_entity(file: str, entity: str, value: str) -> str:
         prefix, suffix = file.rsplit("_", 1)
         ext = suffix.split(".",1)[-1]
         return f"{prefix}_{value}.{ext}"
-    
+
     if entity == "ext":
         return f"{file.split('.',1)[0]}{value}"
-    
+
     if entity == "path":
-        fname=Path(file).name
+        fname = Path(file).name
         if not value:
-            return str(Path().resolve()/fname)
+            return str(Path().resolve() / fname)
         else:
             return f"{value}/{fname}"
-    
+
     entity_label = f"_{entity}-"
     if entity_label in file:
         prefix, suffix = file.split(entity_label, 1)
@@ -310,10 +339,10 @@ def replace_entity(file: str, entity: str, value: str) -> str:
     return file
 
 
-def make_option(value, 
-                key: str=None, 
-                delimeter: str=" ", 
-                convert_underscore: bool=False):
+def make_option(value,
+                key: str = None,
+                delimeter: str = " ",
+                convert_underscore: bool = False):
     """
     Generate a string, representing an option that gets fed into a subprocess or script.
 
@@ -347,10 +376,10 @@ def make_option(value,
     return f"--{key}{second_part}" if key else second_part
 
 
-def export_args_to_file(args, 
-                        argument_group, 
+def export_args_to_file(args,
+                        argument_group,
                         file_path: Path,
-                        extra_args:dict=None):
+                        extra_args:dict = None):
     """
     Takes the arguments in the argument group, and exports their names and values in the 'args'
     namespace to a file specified at 'file_path'. The input 'file_path' can either be a txt
@@ -432,7 +461,7 @@ def clean_paths(path_list):
                 logger.error(f"ERROR removing the path: {path}")
     return all_good
 
-    
+
 def logger_exception_hook(exctype, value, traceback):
     sys.__excepthook__(exctype, value, traceback)
     try:
@@ -451,5 +480,6 @@ def logger_exception_hook(exctype, value, traceback):
         print("An unexpected error occured with the logging :(")
     finally:
         finish_logging()
+
 
 sys.excepthook = logger_exception_hook

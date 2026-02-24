@@ -121,7 +121,7 @@ def build_session_wf(subject, session=None):
         do_nothing_node = Node(IdentityInterface(fields=["end"]), name="do_nothing_node")
         workflow.connect([(inputnode, do_nothing_node, [("subject", "end")])])
         return workflow
-    
+
     confounds_grabber = Node(
         BIDSDataGrabber(
             base_dir=all_opts.preproc_bids,
@@ -168,7 +168,7 @@ def build_session_wf(subject, session=None):
             ("task", "task")
         ])
     ])
-    
+
     design_merging_node = Node(
         MergeUnique(),
         name="merge_design_run_data"
@@ -382,9 +382,9 @@ def build_ses_design_wf(run, task):
     # created the needed design files
     nuisance_regressors = None
     if all_opts.nuisance_regression:
-        nuisance_regressors = [rc if rc not in all_opts.generic_nuisance_columns 
-                              else make_regressor_run_specific(rc, run=run, task=task) 
-                              for rc in all_opts.nuisance_regression]
+        nuisance_regressors = [rc if rc not in all_opts.generic_nuisance_columns
+                               else make_regressor_run_specific(rc, run=run, task=task)
+                               for rc in all_opts.nuisance_regression]
         if ("mean" not in all_opts.nuisance_regression) and (not all_opts.exclude_run_mean):
             nuisance_regressors.append(make_regressor_run_specific("mean", run=run, task=task))
 
@@ -470,7 +470,7 @@ def build_ses_design_wf(run, task):
                 ("tmask_tsv", "in_file")
             ])
         ])
-    
+
     return workflow
 
 
@@ -594,7 +594,6 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
                 ])
             ])
 
-
             run_level_wf = build_run_workflow(run=run,
                                               task=task,
                                               file_extension=file_extension)
@@ -662,7 +661,6 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
             ("include", "inputnode.inclusion_list")
         ])
     ])
-
 
     ### Datasink for user outputs ###
     bold_runs_list = [bf for bold_list in run_map.values() for bf in bold_list]
@@ -934,8 +932,8 @@ def build_run_workflow(run, task: str, file_extension: str):
     if all_opts.nuisance_regression:
 
         regression_wf = build_regression_workflow(
-            tasks=task, 
-            run=run, 
+            tasks=task,
+            run=run,
             need_intercept=all_opts.exclude_run_mean
         )
 
@@ -1216,7 +1214,7 @@ def build_exclusion_wf(run, task):
         ),
         name="outputnode"
     )
-    
+
     validation_merging_node = Node(
         MergeUnique(),
         name="merge_validations_node"
@@ -1351,7 +1349,7 @@ def build_smoothing_wf(run, task: str, file_extension: str):
 
 
 def build_reporting_workflow(tasks):
-    
+
     tasks = listify(tasks)
     workflow = Workflow(name=f"task_{all_opts.combined_task_name}_reporting_wf")
 
@@ -1395,5 +1393,3 @@ def build_reporting_workflow(tasks):
     ])
 
     return workflow
-
-    

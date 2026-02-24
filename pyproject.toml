@@ -17,7 +17,8 @@ dependencies = [
     "matplotlib<4.0.0,>=3.9.1",
     "pybids==0.16.4",
     "nipype>=1.10.0",
-    "niworkflows>=1.14.3"
+    "niworkflows>=1.14.3",
+    "templateflow==25.1.1",
 ]
 
 [dependency-groups]
