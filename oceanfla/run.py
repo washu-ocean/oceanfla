@@ -28,9 +28,10 @@ def main():
     )
     plugin_args_dict = {'n_procs': all_opts.n_procs, 'memory_gb': all_opts.mem_gb}
 
-    logger.info("starting oceanfla!")
     if oceanfla_wf:
+        logger.info("starting oceanfla!")
         oceanfla_wf.run(plugin="MultiProc", plugin_args=plugin_args_dict)
+        
     logger.info("oceanfla is finished!")
 
     # Some clean-up
