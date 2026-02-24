@@ -133,7 +133,8 @@ def get_standard_mask_for_func_data(func_file: str | Path | bids.layout.BIDSFile
         nib.load(closest_res_path),
         target_affine=func_img.affine,
         target_shape=func_img.shape[:3],
-        interpolation="nearest"
+        interpolation="nearest",
+        force_resample=True
     )
     return matched_res_mask
     # return nmask.apply_mask(func_img, matched_res_mask)
