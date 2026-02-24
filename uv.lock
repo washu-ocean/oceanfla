@@ -1296,7 +1296,7 @@ wheels = [
 
 [[package]]
 name = "oceanfla"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "." }
 dependencies = [
     { name = "matplotlib" },
@@ -1310,6 +1310,7 @@ dependencies = [
     { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "scipy", version = "1.16.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "sphinx-rtd-theme" },
+    { name = "templateflow" },
 ]
 
 [package.dev-dependencies]
@@ -1331,6 +1332,7 @@ requires-dist = [
     { name = "pybids", specifier = "==0.16.4" },
     { name = "scipy", specifier = ">=1.13.0" },
     { name = "sphinx-rtd-theme", specifier = ">=2.0.0,<3.0.0" },
+    { name = "templateflow", specifier = "==25.1.1" },
 ]
 
 [package.metadata.requires-dev]
