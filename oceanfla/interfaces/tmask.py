@@ -7,7 +7,58 @@ from nipype.interfaces.base import (
     traits,
 )
 from nipype import Function
+from sqlalchemy import desc
 
+
+class _MakeTmaskInputSpec(BaseInterfaceInputSpec):
+    confounds_file = File(
+        exists=True,
+        mandatory=True,
+        desc="Path to nuisance matrix (as a .csv or .tsv)"
+    )
+    fd_threshold = traits.Float(
+        mandatory=True,
+        desc="FD threshold for masking frames."
+    )
+    minimum_unmasked_neighbors = traits.Int(
+        0,
+        desc="""\
+Number of frames to mask out on either side of each frame masked
+due to motion.
+"""
+    )
+    start_censoring = traits.Int(
+        0,
+        desc="Number of frames to censor out automatically at the beginning of each run."
+    )
+    dscans_tsv = traits.File(
+        exists=True,
+        desc="A bids style dscans file to inform the tmask censoring"
+    )
+
+
+class _MakeTmaskOutputSpec(TraitedSpec):
+    tmask_file = File(
+        exists=True,
+        desc="Path to tmask (a .txt file)"
+    )
+
+
+class MakeTmask(SimpleInterface):
+    input_spec = _MakeTmaskInputSpec
+    output_spec = _MakeTmaskOutputSpec
+
+    def _run_interface(self, runtime):
+        
+        self._results["tmask_file"] = make_tmask(
+            confounds_file=self.inputs.confounds_file,
+            fd_threshold=self.inputs.fd_threshold,
+            minimum_unmasked_neighbors=self.inputs.minimum_unmasked_neighbors,
+            start_censoring=self.inputs.start_censoring,
+        )
+
+        return runtime
+    
 
 def make_tmask(confounds_file: Path | str,
                fd_threshold: int,
@@ -56,50 +107,46 @@ def make_tmask(confounds_file: Path | str,
     return out_file
 
 
-class _MakeTmaskInputSpec(BaseInterfaceInputSpec):
-    confounds_file = File(
+class FindDscansInputSpec(BaseInterfaceInputSpec):
+    dscans_directory = traits.Directory(
         exists=True,
         mandatory=True,
-        desc="Path to nuisance matrix (as a .csv or .tsv)"
+        desc="Path to existing directory containing 'dscans' files (as a .csv or .tsv)"
     )
-    fd_threshold = traits.Float(
+    source_file = traits.File(
         mandatory=True,
-        desc="FD threshold for masking frames."
-    )
-    minimum_unmasked_neighbors = traits.Int(
-        0,
-        desc="""\
-Number of frames to mask out on either side of each frame masked
-due to motion.
-"""
-    )
-    start_censoring = traits.Int(
-        0,
-        desc="Number of frames to censor out automatically at the beginning of each run."
+        desc="A bids file to use as a reference for bids entity values when searching the supplied directory"
     )
 
 
-class _MakeTmaskOutputSpec(TraitedSpec):
-    tmask_file = File(
+class FindDscansOutputSpec(TraitedSpec):
+    dscans_file = File(
         exists=True,
-        desc="Path to tmask (a .txt file)"
+        desc="Path to a dscans file (a .tsv file)"
     )
 
 
-class MakeTmask(SimpleInterface):
+class FindDscans(SimpleInterface):
     input_spec = _MakeTmaskInputSpec
     output_spec = _MakeTmaskOutputSpec
 
     def _run_interface(self, runtime):
         
-        self._results["tmask_file"] = make_tmask(
-            confounds_file=self.inputs.confounds_file,
-            fd_threshold=self.inputs.fd_threshold,
-            minimum_unmasked_neighbors=self.inputs.minimum_unmasked_neighbors,
-            start_censoring=self.inputs.start_censoring,
+        self._results["dscans_file"] = find_dscans_file(
+            dscans_dir=self.inputs.dscans_directory,
+            source_bids=self.inputs.source_file
         )
 
         return runtime
+
+
+def find_dscans_file(dscans_dir:str, 
+                     source_bids:str):
+    from pathlib import Path
+    import pandas as pd
+    
+
+
 
 
 def make_tmask_tsv(tmask_file:str, fd_threshold:float):
@@ -115,9 +162,3 @@ def make_tmask_tsv(tmask_file:str, fd_threshold:float):
     )
     tmask_df.to_csv(out_file, sep="\t")
     return out_file
-
-MakeTmaskTsv = Function(
-    function=make_tmask_tsv,
-    input_names=["tmask_file", "fd_threshold"],
-    output_names=["tmask_tsv"]
-)

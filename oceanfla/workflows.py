@@ -9,7 +9,7 @@ from oceanfla.interfaces.events import EventsMatrix, ModifyEventsFile, get_numbe
 from oceanfla.interfaces.exclusions import CheckRunRetention, CheckRuntSNR
 from oceanfla.interfaces.nuisance import GenerateNuisanceMatrix
 from oceanfla.interfaces.regression import CombineFIRBetas, ConcatRegressionData, MakeRunDesign, RunGLMRegression
-from oceanfla.interfaces.tmask import MakeTmask, MakeTmaskTsv
+from oceanfla.interfaces.tmask import MakeTmask, make_tmask_tsv
 from oceanfla.interfaces.utility import MergeUnique, ExtractDataGroup
 from oceanfla.config import all_opts, get_bids_file, get_logger
 from oceanfla.interfaces.workbench_utils import CiftiParcellate, VolumeSmooth, SurfaceSmooth
@@ -182,6 +182,14 @@ def build_session_wf(subject, session=None):
             bold_bids = get_bids_file(bold_run)
             run = int(bold_bids.entities.get("run", 1))
 
+            bold_run_identity_node = Node(
+                IdentityInterface(
+                    fields=["bold_file"]
+                ),
+                name=f"{task}_run_{run}_bold_identity_node"
+            )
+            bold_run_identity_node.inputs.bold_file = bold_run
+
             ses_design_wf = build_ses_design_wf(run, task)
 
             extract_task_run_souce_node = Node(
@@ -192,22 +200,14 @@ def build_session_wf(subject, session=None):
                 name=f"extract_task_{task}_run_{run}_source_files_node"
             )
 
-            get_volumes_node = Node(
-                Function(
-                    function=get_number_of_volumes,
-                    input_names=["bold_in", "brain_mask"],
-                    output_names=["volumes"]
-                ),
-                name=f"task_{task}_run_{run}_get_run_volumes_node"
-            )
-            get_volumes_node.inputs.brain_mask = all_opts.brain_mask
-            get_volumes_node.inputs.bold_in = bold_run
-
             workflow.connect([
                 (inputnode, ses_design_wf, [
                     ("subject", "inputnode.subject"),
                     ("session", "inputnode.session"),
                 ]),
+                (bold_run_identity_node, ses_design_wf, [
+                    ("bold_file", "inputnode.bold_file")
+                ])
                 (confounds_grabber, extract_task_run_souce_node, [
                     ("confounds", "confounds")
                 ]),
@@ -217,28 +217,8 @@ def build_session_wf(subject, session=None):
                 (extract_task_run_souce_node, ses_design_wf, [
                     ("confounds", "inputnode.confounds_file"),
                     ("events", "inputnode.events_file"),
-                ]),
-                (get_volumes_node, ses_design_wf, [
-                    ("volumes", "inputnode.volumes")
                 ])
             ])
-
-            if all_opts.repetition_time:
-                ses_design_wf.get_node("inputnode").inputs.tr = all_opts.repetition_time
-            else:
-                get_metadata_node = Node(
-                    ReadMetadataFile(
-                        fields=["RepetitionTime"],
-                        error_on_missing=True,
-                    ),
-                    name=f"task_{task}_run_{run}_get_metadata_node"
-                )
-                get_metadata_node.inputs.bids_file = bold_run
-                workflow.connect([
-                    (get_metadata_node, ses_design_wf, [
-                        ("RepetitionTime", "inputnode.tr")
-                    ])
-                ])
 
             # Connect the output of the ses-design workflow to the merging node
             for out_key in ses_design_wf.get_node("outputnode").outputs.get().keys():
@@ -281,8 +261,7 @@ def build_ses_design_wf(run, task):
             fields=[
                 "subject",
                 "session",
-                "tr",
-                "volumes",
+                "bold_file",
                 "confounds_file",
                 "events_file",
             ]
@@ -300,6 +279,9 @@ def build_ses_design_wf(run, task):
         ),
         name="outputnode"
     )
+
+    ### Find Dummy scans if supplied ###
+    
 
     ### Create run-level temporal mask ###
     tmask_node = Node(
@@ -319,6 +301,22 @@ def build_ses_design_wf(run, task):
         ])
     ])
 
+    ### create node to get the number of volumes in the bold run ###
+    get_volumes_node = Node(
+        Function(
+            function=get_number_of_volumes,
+            input_names=["bold_in", "brain_mask"],
+            output_names=["volumes"]
+        ),
+        name=f"task_{task}_run_{run}_get_run_volumes_node"
+    )
+    get_volumes_node.inputs.brain_mask = all_opts.brain_mask
+    workflow.connect([
+        (inputnode, get_volumes_node, [
+            ("bold_file", "bold_in")
+        ])
+    ])
+
     ### Create run-level event matrix ###
     events_matrix_node = Node(
         EventsMatrix(
@@ -331,6 +329,11 @@ def build_ses_design_wf(run, task):
         ),
         name="events_matrix_node"
     )
+    workflow.connect([
+        (get_volumes_node, events_matrix_node, [
+            ("volumes", "volumes")
+        ])
+    ])
 
     if all_opts.group or all_opts.ignore:
         modify_events_file_node = Node(
@@ -355,14 +358,24 @@ def build_ses_design_wf(run, task):
             ])
         ])
 
-    workflow.connect([
-        (inputnode, events_matrix_node, [
-            ("tr", "tr")
-        ]),
-        (inputnode, events_matrix_node, [
-            ("volumes", "volumes")
-        ]),
-    ])
+    if all_opts.repetition_time:
+        events_matrix_node.inputs.tr = all_opts.repetition_time
+    else:
+        get_metadata_node = Node(
+            ReadMetadataFile(
+                fields=["RepetitionTime"],
+                error_on_missing=True,
+            ),
+            name=f"task_{task}_run_{run}_get_metadata_node"
+        )
+        workflow.connect([
+            (inputnode, get_metadata_node, [
+                ("bold_file", "bids_file")
+            ]),
+            (get_metadata_node, events_matrix_node, [
+                ("RepetitionTime", "tr")
+            ])
+        ])
 
     ### Create run-level nuisance matrix ###
     nuisance_mat_node = Node(
@@ -382,7 +395,7 @@ def build_ses_design_wf(run, task):
         ])
     ])
 
-    # created the needed design files
+    ### created the needed design files ###
     nuisance_regressors = None
     if all_opts.nuisance_regression:
         nuisance_regressors = [rc if rc not in all_opts.generic_nuisance_columns 
@@ -410,7 +423,37 @@ def build_ses_design_wf(run, task):
         ])
     ])
 
-    ### Save these run-level files out if requested ###
+    ### save out the run-level tmask files
+    make_tmask_tsv_node = Node(
+        Function(
+            function=make_tmask_tsv,
+            input_names=["tmask_file", "fd_threshold"],
+            output_names=["tmask_tsv"]
+        ),
+        name="make_tmask_tsv_node"
+    )
+    make_tmask_tsv_node.inputs.fd_threshold = all_opts.fd_threshold
+    tmask_ds = Node(FLADataSink(
+        base_directory=all_opts.datasink_path.parent,
+        out_path_base=all_opts.datasink_path.name,
+        extra_bids_patterns=all_opts.bids_patterns,
+        suffix="tmask"
+    ),
+        name="tmask_ds"
+    )
+    workflow.connect([
+        (tmask_node, make_tmask_tsv_node, [
+            ("tmask_file", "tmask_file")
+        ]),
+        (inputnode, tmask_ds, [
+            ("events_file", "source_file")
+        ]),
+        (make_tmask_tsv_node, tmask_ds, [
+            ("tmask_tsv", "in_file")
+        ])
+    ])
+
+    ### Save these other run-level files out if requested ###
     if all_opts.save_intermediates:
         event_matrix_ds = Node(FLADataSink(
             base_directory=all_opts.datasink_path.parent,
@@ -448,31 +491,6 @@ def build_ses_design_wf(run, task):
                     ("nuisance_design", "in_file")
                 ])
             ])
-
-        make_tmask_tsv_node = Node(
-            MakeTmaskTsv,
-            name="make_tmask_tsv_node"
-        )
-        make_tmask_tsv_node.inputs.fd_threshold = all_opts.fd_threshold
-        tmask_ds = Node(FLADataSink(
-            base_directory=all_opts.datasink_path.parent,
-            out_path_base=all_opts.datasink_path.name,
-            extra_bids_patterns=all_opts.bids_patterns,
-            suffix="tmask"
-        ),
-            name="tmask_ds"
-        )
-        workflow.connect([
-            (tmask_node, make_tmask_tsv_node, [
-                ("tmask_file", "tmask_file")
-            ]),
-            (inputnode, tmask_ds, [
-                ("events_file", "source_file")
-            ]),
-            (make_tmask_tsv_node, tmask_ds, [
-                ("tmask_tsv", "in_file")
-            ])
-        ])
     
     return workflow
 
