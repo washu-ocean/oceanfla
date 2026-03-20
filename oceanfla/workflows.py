@@ -9,7 +9,7 @@ from oceanfla.interfaces.events import EventsMatrix, ModifyEventsFile, get_numbe
 from oceanfla.interfaces.exclusions import CheckRunRetention, CheckRuntSNR
 from oceanfla.interfaces.nuisance import GenerateNuisanceMatrix
 from oceanfla.interfaces.regression import CombineFIRBetas, ConcatRegressionData, MakeRunDesign, RunGLMRegression
-from oceanfla.interfaces.tmask import MakeTmask, make_tmask_tsv
+from oceanfla.interfaces.tmask import FindDscans, MakeTmask, make_tmask_tsv
 from oceanfla.interfaces.utility import MergeUnique, ExtractDataGroup
 from oceanfla.config import all_opts, get_bids_file, get_logger
 from oceanfla.interfaces.workbench_utils import CiftiParcellate, VolumeSmooth, SurfaceSmooth
@@ -54,7 +54,7 @@ space.
 def build_oceanfla_wf(subjects: list[str] | str | None, base_dir=Path | str):
 
     tasks = all_opts.task
-    wf_name = f"oceanfla_tasks_{all_opts.combined_task_name}_wf"
+    wf_name = f"oceanfla_task_{all_opts.task_rename}_wf"
     fla_wf = Workflow(name=wf_name, base_dir=base_dir)
 
     subject_list = listify(subjects)
@@ -207,7 +207,7 @@ def build_session_wf(subject, session=None):
                 ]),
                 (bold_run_identity_node, ses_design_wf, [
                     ("bold_file", "inputnode.bold_file")
-                ])
+                ]),
                 (confounds_grabber, extract_task_run_souce_node, [
                     ("confounds", "confounds")
                 ]),
@@ -280,9 +280,6 @@ def build_ses_design_wf(run, task):
         name="outputnode"
     )
 
-    ### Find Dummy scans if supplied ###
-    
-
     ### Create run-level temporal mask ###
     tmask_node = Node(
         MakeTmask(
@@ -299,7 +296,24 @@ def build_ses_design_wf(run, task):
         (tmask_node, outputnode, [
             ("tmask_file", "tmask_file"),
         ])
-    ])
+    ]) 
+    
+    ### Find Dummy scans if supplied ###
+    if all_opts.dscans_path:
+        find_dscans_node = Node(
+            FindDscans(
+                dscans_directory=all_opts.dscans_path,
+            ),
+            name="find_dscans_node"
+        )
+        workflow.connect([
+            (inputnode, find_dscans_node, [
+                ("bold_file", "source_file")
+            ]),
+            (find_dscans_node, tmask_node, [
+                ("dscans_file", "dscans_tsv")
+            ])
+        ])
 
     ### create node to get the number of volumes in the bold run ###
     get_volumes_node = Node(
@@ -671,7 +685,7 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
     # * concat run-level info
     # * run session-level glm
     regression_wf = build_regression_workflow(
-        tasks=all_opts.task,
+        task=all_opts.task_rename,
         need_intercept=True
     )
 
@@ -697,7 +711,7 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
             dismiss_entities=["desc", "run", "den"],
             suffix="boldmap",
             stat="effect",
-            task=all_opts.combined_task_name,
+            task=all_opts.task_rename,
             allowed_entities=("condition", "stat"),
             source_file=bold_runs_list
         ),
@@ -727,7 +741,7 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
                 dismiss_entities=["desc", "run", "den"],
                 suffix="boldmap",
                 stat="effect",
-                task=all_opts.combined_task_name,
+                task=all_opts.task_rename,
                 allowed_entities=("condition", "stat"),
                 source_file=bold_runs_list
             ),
@@ -756,7 +770,7 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
             compress=need_compress,
             dismiss_entities=["run", "den"],
             desc="glmResidual",
-            task=all_opts.combined_task_name,
+            task=all_opts.task_rename,
             source_file=bold_runs_list
         ),
         name=f"{func_space}_residual_bold_ds"
@@ -777,7 +791,7 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
             desc="final",
             space=func_space,
             suffix="design",
-            task=all_opts.combined_task_name,
+            task=all_opts.task_rename,
             source_file=bold_runs_list
         ),
         name=f"{func_space}_design_ds"
@@ -791,14 +805,14 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
             desc="final",
             space=func_space,
             suffix="correlations",
-            task=all_opts.combined_task_name,
+            task=all_opts.task_rename,
             source_file=bold_runs_list
         ),
         name=f"{func_space}_design_corr_ds"
     )
 
     # TODO: add Report workflow
-    reporting_wf = build_reporting_workflow(tasks=all_opts.task)
+    reporting_wf = build_reporting_workflow(task=all_opts.task_rename)
     workflow.connect([
         (regression_wf, reporting_wf, [
             ("outputnode.design_matrix", "inputnode.design_matrix"),
@@ -955,7 +969,7 @@ def build_run_workflow(run, task: str, file_extension: str):
     if all_opts.nuisance_regression:
 
         regression_wf = build_regression_workflow(
-            tasks=task, 
+            task=task, 
             run=run, 
             need_intercept=all_opts.exclude_run_mean
         )
@@ -967,7 +981,7 @@ def build_run_workflow(run, task: str, file_extension: str):
             (inputnode, regression_wf, [
                 ("nuisance_design", "inputnode.design_matrices"),
                 ("tmask_file", "inputnode.tmask_files"),
-                ("include", "execute")
+                ("include", "inputnode.execute")
             ]),
         ])
         last_func_node = regression_wf.get_node("outputnode")
@@ -1099,10 +1113,9 @@ def build_run_workflow(run, task: str, file_extension: str):
     return workflow
 
 
-def build_regression_workflow(tasks, run=None, regression_columns=None, need_intercept=False):
+def build_regression_workflow(task:str, run=None, regression_columns=None, need_intercept=False):
 
-    tasks = listify(tasks)
-    wf_label = f"task_{all_opts.combined_task_name}"
+    wf_label = f"task_{task}"
     if run:
         wf_label += f"_run_{run}"
     workflow = Workflow(name=f"{wf_label}_regression_wf")
@@ -1138,7 +1151,7 @@ def build_regression_workflow(tasks, run=None, regression_columns=None, need_int
     concat_data_node = Node(
         ConcatRegressionData(
             include_intercept=need_intercept,
-            tasks=tasks,
+            task=task,
             brain_mask=all_opts.brain_mask,
         ),
         name="concat_data_node"
@@ -1185,34 +1198,6 @@ def build_regression_workflow(tasks, run=None, regression_columns=None, need_int
                          concat_data_node, "tmask_files_in")
     else:
         concat_data_node.inputs.tmask_files_in = None
-
-    # if all_opts.fir:
-    #     combine_fir_betas_node = Node(
-    #         CombineFIRBetas(
-    #             brain_mask=all_opts.brain_mask
-    #         ),
-    #         name="combine_fir_betas_node"
-    #     )
-    #     workflow.connect([
-    #         (glm_node, combine_fir_betas_node, [
-    #             ("beta_files", "beta_files"),
-    #             ("beta_labels", "beta_labels")
-    #         ]),
-    #         (concat_data_node, combine_fir_betas_node, [
-    #             ("execute", "execute")
-    #         ]),
-    #         (combine_fir_betas_node, outputnode, [
-    #             ("beta_files", "beta_files"),
-    #             ("beta_labels", "beta_labels"),
-    #         ])
-    #     ])
-    # else:
-    #     workflow.connect([
-    #         (glm_node, outputnode, [
-    #             ("beta_files", "beta_files"),
-    #             ("beta_labels", "beta_labels"),
-    #         ])
-    #     ])
 
     return workflow
 
@@ -1368,13 +1353,15 @@ def build_smoothing_wf(run, task: str, file_extension: str):
             ])
         ])
 
+    else:
+        raise RuntimeError(f"oceanfla does not support smoothing for files of type <{file_extension}>")
+
     return workflow
 
 
-def build_reporting_workflow(tasks):
+def build_reporting_workflow(task:str):
     
-    tasks = listify(tasks)
-    workflow = Workflow(name=f"task_{all_opts.combined_task_name}_reporting_wf")
+    workflow = Workflow(name=f"task_{task}_reporting_wf")
 
     inputnode = Node(
         IdentityInterface(

@@ -7,8 +7,8 @@ from nipype.interfaces.base import (
     traits,
 )
 from nipype import Function
+from pydot import Union
 from sqlalchemy import desc
-
 
 class _MakeTmaskInputSpec(BaseInterfaceInputSpec):
     confounds_file = File(
@@ -31,8 +31,10 @@ due to motion.
         0,
         desc="Number of frames to censor out automatically at the beginning of each run."
     )
-    dscans_tsv = traits.File(
-        exists=True,
+    dscans_tsv = traits.Union(
+        None,
+        traits.File(exists=True),
+        default_value=None,
         desc="A bids style dscans file to inform the tmask censoring"
     )
 
@@ -55,6 +57,7 @@ class MakeTmask(SimpleInterface):
             fd_threshold=self.inputs.fd_threshold,
             minimum_unmasked_neighbors=self.inputs.minimum_unmasked_neighbors,
             start_censoring=self.inputs.start_censoring,
+            dscans_file = self.inputs.dscans_tsv
         )
 
         return runtime
@@ -63,7 +66,8 @@ class MakeTmask(SimpleInterface):
 def make_tmask(confounds_file: Path | str,
                fd_threshold: int,
                minimum_unmasked_neighbors: int,
-               start_censoring: int):
+               start_censoring: int,
+               dscans_file: str = None):
     from oceanfla.utilities import replace_entities
     import pandas as pd
     import numpy as np
@@ -95,6 +99,15 @@ def make_tmask(confounds_file: Path | str,
         fd_mask = fd_arr < fd_threshold
     fd_mask[:start_censoring] = False
 
+    if dscans_file:
+        dummy_scans_df = pd.read_csv(dscans_file, sep="\t")
+        if "dummy_scan" not in dummy_scans_df.columns.to_list():
+            raise RuntimeError(f"cannot find the 'dummy_scan' column in the supplied dscans file: {dscans_file}")
+        dummy_scans = dummy_scans_df.loc[:, "dummy_scan"].to_numpy().astype(int)
+        if len(dummy_scans) != len(fd_mask):
+            raise RuntimeError(f"length of tmask: {len(fd_mask)} and dcans file: {len(dummy_scans)} are not equal")
+        fd_mask[dummy_scans>0] = False
+
     out_file = replace_entities(
             file=confounds_file, 
             entities={
@@ -120,15 +133,16 @@ class FindDscansInputSpec(BaseInterfaceInputSpec):
 
 
 class FindDscansOutputSpec(TraitedSpec):
-    dscans_file = File(
-        exists=True,
+    dscans_file = traits.Union(
+        File(exists=True),
+        None,
         desc="Path to a dscans file (a .tsv file)"
     )
 
 
 class FindDscans(SimpleInterface):
-    input_spec = _MakeTmaskInputSpec
-    output_spec = _MakeTmaskOutputSpec
+    input_spec = FindDscansInputSpec
+    output_spec = FindDscansOutputSpec
 
     def _run_interface(self, runtime):
         
@@ -144,9 +158,50 @@ def find_dscans_file(dscans_dir:str,
                      source_bids:str):
     from pathlib import Path
     import pandas as pd
+    from bids.layout import parse_file_entities
+    from oceanfla.config import get_logger
     
+    logger = get_logger("nipype.interface")
 
+    # the entities we will use to match files
+    match_entities = ["subject", "task"]
+    source_entities = parse_file_entities(source_bids)
+    for match_ent in match_entities:
+        if match_ent not in source_entities:
+            raise RuntimeError(f"Cannot find the needed entities from the source file while looking for dscans files: {match_entities}")
+    match_entities.append("echo")
+    match_entities.append("run")
 
+    # search the dscans directory for possible matches
+    sub, task = source_entities["subject"], source_entities["task"]
+    ses = None
+    if "session" in source_entities:
+        ses = source_entities["session"]
+        match_entities.append("session")
+    dscans_files = sorted(Path(dscans_dir).glob(f"**/sub-{sub}{'_ses-'+ses if ses else ''}_task-{task}*_dscans.tsv"))
+
+    # loop through files and see what matches all needed entities
+    selected_dscans_file = None
+    for dfile in dscans_files:
+        dfile_entities = parse_file_entities(str(dfile.resolve()))
+        all_match = True
+        for match_ent in match_entities:
+            if match_ent in source_entities:
+                if match_ent not in dfile_entities:
+                    all_match = False
+                    break
+                if source_entities[match_ent] != dfile_entities[match_ent]:
+                    all_match = False
+                    break
+        if all_match:
+            selected_dscans_file = str(dfile.resolve())
+            break
+    
+    if selected_dscans_file:
+        logger.info(f"found dcans file <{selected_dscans_file}> from source file <{source_bids}>")
+    else:
+        logger.info(f"did not find any dcans file for source file <{source_bids}>")
+    return selected_dscans_file
 
 
 def make_tmask_tsv(tmask_file:str, fd_threshold:float):

@@ -111,9 +111,12 @@ def extract_task_run_file(bids_list: list,
                            task_needed: str,
                            run_needed: int):
     from bids.layout import parse_file_entities
+    from pathlib import Path
     
     for file in bids_list:
-        bids_file_entities = parse_file_entities(file)
+        fpath = Path(file)
+        parse_path = Path(fpath.parent.name) / fpath.name
+        bids_file_entities = parse_file_entities(str(parse_path))
         run = int(bids_file_entities.get("run", 1))
         if run == int(run_needed) and bids_file_entities["task"] == task_needed:
             return file

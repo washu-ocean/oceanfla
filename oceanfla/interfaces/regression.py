@@ -100,10 +100,8 @@ class ConcatRegressionDataInputSpec(OptionalInterfaceSpec):
         default_value=True,
         desc=""
     )
-    tasks = traits.Union(
-        traits.List(trait=traits.Str),
-        traits.Str,
-        desc="The task(s) that this regression is for"
+    task = traits.Str(
+        desc="The task that this regression is for"
     )
     brain_mask = traits.Union(
         traits.File(exists=True),
@@ -148,7 +146,7 @@ class ConcatRegressionData(OptionalInterface):
             tmask_files=tmask_files,
             inclusion_list=self.inputs.inclusion_list,
             add_intercept=self.inputs.include_intercept,
-            tasks=self.inputs.tasks,
+            task=self.inputs.task,
             brain_mask=self.inputs.brain_mask
         )
 
@@ -251,7 +249,7 @@ def massuni_linGLM(func_file: str,
     return (beta_files, beta_labels, residual_filename)
 
 
-def combine_regression_data(tasks: list,
+def combine_regression_data(task: str,
                             func_list: list=None,
                             tmask_files: list = None,
                             design_matrix_files: list = None,
@@ -287,8 +285,8 @@ def combine_regression_data(tasks: list,
     tmask_list = [np.loadtxt(f) for f in tmask_files] if tmask_files else None
 
     # concatenate all of the data on the time axis
-    task_label = "-".join(tasks)
-    entities_base = {"desc": "modelInput", "task": task_label, "path": None}
+
+    entities_base = {"desc": "modelInput", "task": task, "path": None}
     if len(func_list) > 1:
         entities_base["run"] = None
     res_list = []
