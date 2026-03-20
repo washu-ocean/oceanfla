@@ -16,12 +16,16 @@ class _FilterDataInputSpec(OptionalInterfaceSpec):
         exists=True, mandatory=True,
         desc="Run mask (as a .txt)."
     )
-    high_pass = traits.Float(
-        default_value=0.008,
+    high_pass = traits.Union(
+        None,
+        traits.Float(),
+        default_value=None,
         desc="The lowest frequency allowed (Hz)"
     )
-    low_pass = traits.Float(
-        default_value=0.1,
+    low_pass = traits.Union(
+        None,
+        traits.Float(),
+        default_value=None,
         desc="The highest frequency allowed (Hz)"
     )
     tr = traits.Float(
@@ -116,8 +120,8 @@ class PercentChange(OptionalInterface):
 def filter_data(func_file: str,
                 tmask_file: str,
                 tr: float,
-                low_pass: float = 0.1,
-                high_pass: float = 0.008,
+                low_pass: float = None,
+                high_pass: float = None,
                 padtype: str = "mean",
                 padlen: int = 50,
                 brain_mask: str = None):

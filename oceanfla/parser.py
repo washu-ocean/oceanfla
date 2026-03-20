@@ -15,7 +15,7 @@ def _build_parser():
 
     # Build out some useful argument types
     def ExistingPath(path):
-        p = Path(path)
+        p = Path(path).resolve()
         if not p.exists():
             raise argparse.ArgumentTypeError(
                 f"path string <{path}> does not represent an existing path"
@@ -141,6 +141,9 @@ def _build_parser():
 
     config_arguments.add_argument("--task", "-t", nargs="+", required=True,
                                   help="The name of the task(s) to analyze.")
+    
+    config_arguments.add_argument("--task_rename", type=str,
+                                  help="The task name to use for the output files. This is typically used if multiple source tasks are modeled together.")
 
     config_arguments.add_argument("--brain_mask", "-bm", type=ExistingFile,
                                   help="If the bold file type is volumetric data, a brain mask must also be supplied.")
@@ -165,7 +168,7 @@ def _build_parser():
     config_arguments.add_argument("--derivs_subfolder", "-ds", default="first_level",
                                   help="The name of the subfolder in the derivatives directory where bids style outputs should be stored. The default is 'first_level'.")
 
-    config_arguments.add_argument("--output_dir", "-o", type=ExistingDir,
+    config_arguments.add_argument("--output_dir", "-o", type=Path,
                                   help="Alternate Path to a directory to store the results of this analysis. Default is '[derivs_dir]/first_level/'")
 
     config_arguments.add_argument("--work_dir", "-w", type=ExistingDir, required=True,
@@ -210,6 +213,10 @@ def _build_parser():
 
     config_arguments.add_argument("--start_censoring", "-sc", type=PositiveInt, default=0,
                                   help="The number of frames to censor out at the beginning of each run. Typically used to censor scanner equilibrium time. Default is 0")
+    
+    config_arguments.add_argument("--dscans_path", type=ExistingDir,
+                                  help="""The path to the directory containing 'dscans' files for inserting dummy scans into bold runs. Files must be named exactly as corresponding bold image except with 'dscans' as 
+                                  the suffix and '.tsv' as the extension. Contents of the file must be a column, titled 'dummy_scan', with ones and zeros. Ones denote which frames should be dummy scans.""")
 
     config_arguments.add_argument("--confounds", "-c", nargs="+", default=[],
                                   help="A list of confounds to include from each confound timeseries tsv file.")
@@ -343,19 +350,20 @@ def parse_args():
                     "Each use of the '--group' argument must have a least 3 values")
 
     # Create label for this execution attempt
-    args.combined_task_name = "-".join(sorted(args.task))
+    if not args.task_rename:
+        args.task_rename = "-".join(sorted(args.task))
     tstamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    execution_label = f"oceanfla_task-{args.combined_task_name}_{tstamp}"
+    execution_label = f"oceanfla_task-{args.task_rename}_{tstamp}"
 
-    if not hasattr(args, "output_dir") or args.output_dir is None:
-        args.datasink_path = args.derivs_dir / args.derivs_subfolder
+    if hasattr(args, "output_dir") and args.output_dir is not None:
+        args.datasink_path = args.output_dir.resolve()
     else:
-        args.datasink_path = args.output_dir
+        args.datasink_path = args.derivs_dir.resolve() / args.derivs_subfolder
 
     # Check if old outputs exist
     old_outputs, remove_old_outputs = set(), False
     ses_label = f"ses-{args.session}_" if args.session else ''
-    for task in args.task + [args.combined_task_name]:
+    for task in args.task + [args.task_rename]:
         if args.subject:
             for sub in args.subject:
                 old_outputs.update(args.datasink_path.glob(f"sub-{sub}/**/func/sub-{sub}_{ses_label}*task-{task}_*"))
