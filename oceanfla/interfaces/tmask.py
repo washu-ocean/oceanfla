@@ -6,9 +6,6 @@ from nipype.interfaces.base import (
     TraitedSpec,
     traits,
 )
-from nipype import Function
-from pydot import Union
-from sqlalchemy import desc
 
 class _MakeTmaskInputSpec(BaseInterfaceInputSpec):
     confounds_file = File(

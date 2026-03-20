@@ -12,7 +12,7 @@ from nipype.interfaces.workbench.cifti import (
     CiftiSmoothOutputSpec
 )
 
-from oceanfla.interfaces.utility import OptionalInterface, OptionalInterfaceSpec, OptionalCommandLineInterface
+from oceanfla.interfaces.utility import OptionalInterfaceSpec, OptionalCommandLineInterface
 
 
 class VolumeSmoothInputSpec(OptionalInterfaceSpec, CommandLineInputSpec):
