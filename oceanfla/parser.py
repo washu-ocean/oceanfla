@@ -227,8 +227,8 @@ def _build_parser():
     config_arguments.add_argument("--minimum_unmasked_neighbors", "-mun", type=PositiveInt, default=0,
                                   help="Minimum number of contiguous unmasked frames on either side of a given frame that's required to be under the fd_threshold; any unmasked frame without the required number of neighbors will be masked.")
 
-    config_arguments.add_argument("--tmask", action=argparse.BooleanOptionalAction,
-                                  help="Flag to indicate that tmask files, if found with the preprocessed outputs, should be used. Tmask files will override framewise displacement threshold censoring if applicable.")
+    # config_arguments.add_argument("--tmask", action=argparse.BooleanOptionalAction,
+    #                               help="Flag to indicate that tmask files, if found with the preprocessed outputs, should be used. Tmask files will override framewise displacement threshold censoring if applicable.")
 
     config_arguments.add_argument("--repetition_time", "-tr", type=AboveZeroFloat,
                                   help="Repetition time of the function runs in seconds. If it is not supplied, an attempt will be made to read it from the JSON sidecar file.")
@@ -257,7 +257,7 @@ def _build_parser():
                                     help="Flag to indicate that frames above the framewise displacement threshold should be censored before the GLM.")
 
     config_arguments.add_argument("--run_exclusion_threshold", "-re", type=Percent, default=0.0,
-                                  help="The percent of frames a run must retain after high motion censoring to be included in the fine GLM. Only has effect when '--fd_censoring' is active.")
+                                  help="The percent of frames a run must retain after high motion censoring to be included in the fine GLM.")
 
     config_arguments.add_argument("--min_average_tsnr", type=PositiveFloat, default=0.0,
                                   help="The minimum whole-brain-average TSNR (across unmasked frames) required for a run to be included in analysis.")
@@ -319,7 +319,7 @@ def parse_args():
         if not args.fir_vars or not args.hrf_vars:
             parser.error(
                 "Must specify variables to apply each model to if using both types of models")
-    elif args.hrf is None and args.fir is None:
+    elif (args.hrf is None) and (args.fir is None) and (args.custom_hrf is None):
         parser.error(
             "Must include model parameters for at least one of the models, fir or hrf.")
 
@@ -327,6 +327,7 @@ def parse_args():
         if not (args.custom_hrf.exists() and args.custom_hrf.suffix == ".txt"):
             parser.error(
                 "The 'custom_hrf' argument must be a file of type '.txt' and must exist")
+        args.hrf = args.custom_hrf
 
     # if args.parcellate:
     #     if (not args.parcellate.exists()) or (not args.parcellate.name.endswith(".dlabel.nii")):
