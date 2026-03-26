@@ -286,7 +286,7 @@ def hrf_convolve_features(features,
                            units: str = 's',
                            time_to_peak: int = 5,
                            undershoot_dur: int = 12,
-                           custom_hrf: Path = None):
+                           custom_hrf: Path|str = None):
     """
     This function convolves a hemodynamic response function with each column in a timeseries dataframe.
 
