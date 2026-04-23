@@ -88,7 +88,7 @@ class RunGLMRegression(OptionalInterface):
 
         beta_files, tstat_files, pval_files, beta_labels, r_squared_file, mse_file, masked_design_file, func_residual_file = massuni_linGLM(
             func_file=self.inputs.bold_file_in,
-            design_matrix=self.inputs.design_matrix,
+            design_matrix_file=self.inputs.design_matrix,
             tmask_file=self.inputs.tmask_file,
             stdscale=self.inputs.stdscale,
             brain_mask=self.inputs.brain_mask
@@ -254,6 +254,7 @@ def massuni_linGLM(func_file: str,
     pval_files = []
     old_ext = parse_file_entities(func_file)["extension"]
     for i, beta_label in enumerate(design_matrix.columns):
+        beta_label = beta_label.replace("_", "-")
         beta_entities = entities_base | {"suffix": f"beta-{beta_label}_boldmap"}
         t_stat_entities = entities_base | {"suffix": f"beta-{beta_label}-wald-t_boldmap"}
         student_p_entities = entities_base | {"suffix": f"beta-{beta_label}-2side-p_boldmap"}
@@ -274,21 +275,21 @@ def massuni_linGLM(func_file: str,
             data=(regression_results.theta[i])[np.newaxis, :],
             source_header=func_file,
             out_file=beta_filename,
-            scalar_axis=[f"beta-{beta_label}"],
+            scalar_axis=[f"{beta_label}_beta"],
             brain_mask=brain_mask
         )
         beta_files.append(beta_filename)
-        beta_labels.append(beta_label.replace("_", "-"))
+        beta_labels.append(beta_label)
 
         waldt_filename = replace_entities(
             file=func_file,
             entities=t_stat_entities
         )
         create_image_like(
-            data=(wald_t_stats)[np.newaxis, :],
+            data=wald_t_stats[np.newaxis, :],
             source_header=func_file,
             out_file=waldt_filename,
-            scalar_axis=[f"wald-t"],
+            scalar_axis=[f"{beta_label}_wald-t"],
             brain_mask=brain_mask
         )
         wald_stat_files.append(waldt_filename)
@@ -298,10 +299,10 @@ def massuni_linGLM(func_file: str,
             entities=student_p_entities
         )
         create_image_like(
-            data=(student_p_two_sided)[np.newaxis, :],
+            data=student_p_two_sided[np.newaxis, :],
             source_header=func_file,
             out_file=pval_filename,
-            scalar_axis=[f"p-val"],
+            scalar_axis=[f"{beta_label}_p-val"],
             brain_mask=brain_mask
         )
         pval_files.append(pval_filename)
@@ -312,7 +313,7 @@ def massuni_linGLM(func_file: str,
         entities=entities_base | {"suffix": "r-squared", "ext":old_ext.replace("tseries", "scalar")}
     )
     create_image_like(
-        data=regression_results.r_square,
+        data=regression_results.r_square[np.newaxis, :],
         source_header=func_file,
         out_file=r_squared_filename,
         scalar_axis=["r-squared"],
@@ -325,7 +326,7 @@ def massuni_linGLM(func_file: str,
         entities=entities_base | {"suffix": "MSE", "ext":old_ext.replace("tseries", "scalar")}
     )
     create_image_like(
-        data=regression_results.MSE,
+        data=regression_results.MSE[np.newaxis, :],
         source_header=func_file,
         out_file=mse_filename,
         scalar_axis=["MSE"],

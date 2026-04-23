@@ -1324,12 +1324,12 @@ def build_regression_workflow(task:str, run=None, regression_columns=None, need_
         ]),
         (concat_data_node, glm_node, [
             ("bold_file", "bold_file_in"),
-            ("design_matrix", "unmasked_design_matrix"),
+            ("design_matrix", "design_matrix"),
             ("tmask_file", "tmask_file"),
             ("execute", "execute")
         ]),
         (concat_data_node, outputnode, [
-            ("design_matrix", "design_matrix"),
+            ("design_matrix", "unmasked_design_matrix"),
             ("execute", "execute")
         ]),
         (glm_node, outputnode, [
