@@ -44,14 +44,40 @@ class RunGLMRegressionOutputSpec(OptionalInterfaceSpec):
         desc=""
     )
 
+    tstat_files = traits.List(
+        trait=traits.File(exists=True),
+        desc=""
+    )
+
+    pval_files = traits.List(
+        trait=traits.File(exists=True),
+        desc=""
+    )
+
     beta_labels = traits.List(
         trait=traits.Str,
         desc=""
     )
 
+    r_squared_file = traits.File(
+        exists=True,
+        desc=""
+    ) 
+
+    mse_file = traits.File(
+        exists=True,
+        desc=""
+    ) 
+
+    masked_design_matrix = traits.File(
+        exists=True,
+        desc="The design matrix for the regression after masking"
+    )
+
     residual_bold_file = traits.File(
         exists=True,
-        desc="")
+        desc=""
+    ) 
 
 
 class RunGLMRegression(OptionalInterface):
@@ -60,7 +86,7 @@ class RunGLMRegression(OptionalInterface):
 
     def _run_interface(self, runtime):
 
-        beta_files, beta_labels, func_residual_file = massuni_linGLM(
+        beta_files, tstat_files, pval_files, beta_labels, r_squared_file, mse_file, masked_design_file, func_residual_file = massuni_linGLM(
             func_file=self.inputs.bold_file_in,
             design_matrix=self.inputs.design_matrix,
             tmask_file=self.inputs.tmask_file,
@@ -69,7 +95,12 @@ class RunGLMRegression(OptionalInterface):
         )
 
         self._results["beta_files"] = beta_files
+        self._results["tstat_files"] = tstat_files
+        self._results["pval_files"] = pval_files
         self._results["beta_labels"] = beta_labels
+        self._results["r_squared_file"] = r_squared_file
+        self._results["mse_file"] = mse_file
+        self._results["masked_design_matrix"] = masked_design_file
         self._results["residual_bold_file"] = func_residual_file
 
         return runtime
@@ -154,7 +185,7 @@ class ConcatRegressionData(OptionalInterface):
 
 
 def massuni_linGLM(func_file: str,
-                   design_matrix: str,
+                   design_matrix_file: str,
                    tmask_file: str,
                    stdscale: bool,
                    brain_mask: str = None):
@@ -176,9 +207,12 @@ def massuni_linGLM(func_file: str,
     import numpy as np
     from sklearn.preprocessing import StandardScaler
     from bids.layout import parse_file_entities
+    from nilearn.glm.regression import OLSModel
+    # from nilearn.glm.first_level import run_glm
+    from scipy.stats import chi2, t
 
     func_data = load_data(func_file, brain_mask)
-    design_matrix = pd.read_csv(design_matrix, sep="\t")
+    design_matrix = pd.read_csv(design_matrix_file, sep="\t")
     design_matrix_data = design_matrix.to_numpy()
     mask = np.loadtxt(tmask_file).astype(bool) if tmask_file else np.full(
         shape=(func_data.shape[0],), fill_value=True)
@@ -198,9 +232,9 @@ def massuni_linGLM(func_file: str,
         masked_func_data = func_ss.fit_transform(masked_func_data)
         masked_design_matrix = design_ss.fit_transform(masked_design_matrix)
 
-    # compute beta values
-    inv_mat = np.linalg.pinv(masked_design_matrix)
-    beta_data = np.dot(inv_mat, masked_func_data)
+    # initialize the model and compute the betas
+    model = OLSModel(masked_design_matrix)
+    regression_results = model.fit(masked_func_data)
 
     # standardize the unmasked data
     if stdscale:
@@ -208,7 +242,7 @@ def massuni_linGLM(func_file: str,
         design_matrix_data = design_ss.transform(design_matrix_data)
 
     # compute the residuals with unmasked data
-    est_values = np.dot(design_matrix_data, beta_data)
+    est_values = np.dot(design_matrix_data, regression_results.theta)
     resids = func_data - est_values
 
     # save the data out
@@ -216,17 +250,28 @@ def massuni_linGLM(func_file: str,
 
     # beta files
     beta_files, beta_labels, = [], []
+    wald_stat_files = []
+    pval_files = []
+    old_ext = parse_file_entities(func_file)["extension"]
     for i, beta_label in enumerate(design_matrix.columns):
         beta_entities = entities_base | {"suffix": f"beta-{beta_label}_boldmap"}
+        t_stat_entities = entities_base | {"suffix": f"beta-{beta_label}-wald-t_boldmap"}
+        student_p_entities = entities_base | {"suffix": f"beta-{beta_label}-2side-p_boldmap"}
+        
+        wald_t_stats = regression_results.t(i)
+        student_p_two_sided = 2 * (1 - t.cdf(np.abs(wald_t_stats), regression_results.df_residuals))
+
         if is_cifti_file(func_file):
-            old_ext = parse_file_entities(func_file)["extension"]
             beta_entities["ext"] = old_ext.replace("tseries", "scalar")
+            t_stat_entities["ext"] = old_ext.replace("tseries", "scalar")
+            student_p_entities["ext"] = old_ext.replace("tseries", "scalar")
+
         beta_filename = replace_entities(
             file=func_file,
             entities=beta_entities
         )
         create_image_like(
-            data=(beta_data[i])[np.newaxis, :],
+            data=(regression_results.theta[i])[np.newaxis, :],
             source_header=func_file,
             out_file=beta_filename,
             scalar_axis=[f"beta-{beta_label}"],
@@ -234,6 +279,66 @@ def massuni_linGLM(func_file: str,
         )
         beta_files.append(beta_filename)
         beta_labels.append(beta_label.replace("_", "-"))
+
+        waldt_filename = replace_entities(
+            file=func_file,
+            entities=t_stat_entities
+        )
+        create_image_like(
+            data=(wald_t_stats)[np.newaxis, :],
+            source_header=func_file,
+            out_file=waldt_filename,
+            scalar_axis=[f"wald-t"],
+            brain_mask=brain_mask
+        )
+        wald_stat_files.append(waldt_filename)
+
+        pval_filename = replace_entities(
+            file=func_file,
+            entities=student_p_entities
+        )
+        create_image_like(
+            data=(student_p_two_sided)[np.newaxis, :],
+            source_header=func_file,
+            out_file=pval_filename,
+            scalar_axis=[f"p-val"],
+            brain_mask=brain_mask
+        )
+        pval_files.append(pval_filename)
+
+    # Model fit (R^2)
+    r_squared_filename = replace_entities(
+        file=func_file,
+        entities=entities_base | {"suffix": "r-squared", "ext":old_ext.replace("tseries", "scalar")}
+    )
+    create_image_like(
+        data=regression_results.r_square,
+        source_header=func_file,
+        out_file=r_squared_filename,
+        scalar_axis=["r-squared"],
+        brain_mask=brain_mask
+    )
+
+    # Mean square error
+    mse_filename = replace_entities(
+        file=func_file,
+        entities=entities_base | {"suffix": "MSE", "ext":old_ext.replace("tseries", "scalar")}
+    )
+    create_image_like(
+        data=regression_results.MSE,
+        source_header=func_file,
+        out_file=mse_filename,
+        scalar_axis=["MSE"],
+        brain_mask=brain_mask
+    )
+
+    # masked design matrix
+    masked_design_file = replace_entities(
+        file=design_matrix_file,
+        entities=entities_base | {"suffix": "masked-design"}
+    )
+    used_design_matrix = design_matrix[mask]
+    used_design_matrix.to_csv(masked_design_file, index=False, sep="\t")
 
     # residual bold data
     residual_filename = replace_entities(
@@ -246,7 +351,7 @@ def massuni_linGLM(func_file: str,
         out_file=residual_filename,
         brain_mask=brain_mask
     )
-    return (beta_files, beta_labels, residual_filename)
+    return (beta_files, wald_stat_files, pval_files, beta_labels, r_squared_filename, mse_filename, masked_design_file, residual_filename)
 
 
 def combine_regression_data(task: str,

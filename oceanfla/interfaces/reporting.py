@@ -10,12 +10,7 @@ class PlotDesignInputSpec(OptionalInterfaceSpec):
     design_matrix = traits.Union(
         traits.File(exists=True),
         None,
-        desc="The design matrix to plot"
-    )
-    tmask_file = traits.Union(
-        traits.File(exists=True),
-        None,
-        desc="The temporal mask file",
+        desc="The masked design matrix to plot"
     )
 
 class PlotDesignOutputSpec(OptionalInterfaceSpec):
@@ -34,13 +29,12 @@ class PlotDesign(OptionalInterface):
 
     def _run_interface(self, runtime):
         self._results["design_plot"], self._results["design_correlations"] = plot_design_matrix(
-            design_matrix=self.inputs.design_matrix,
-            tmask_file=self.inputs.tmask_file
+            design_matrix=self.inputs.design_matrix
         )
         return runtime
     
 
-def plot_design_matrix(design_matrix, tmask_file=None):
+def plot_design_matrix(design_matrix):
     from oceanfla.utilities import replace_entities
     import pandas as pd
     import numpy as np
@@ -49,15 +43,15 @@ def plot_design_matrix(design_matrix, tmask_file=None):
 
 
     design_df = pd.read_csv(design_matrix, sep="\t")
-    mask = np.loadtxt(tmask_file).astype(bool) if tmask_file else np.full(
-        shape=(len(design_df),), fill_value=True)
+    # mask = np.loadtxt(tmask_file).astype(bool) if tmask_file else np.full(
+    #     shape=(len(design_df),), fill_value=True)
     
-    masked_design_df = design_df[mask]
-    num_conditions = len(masked_design_df.columns)
-    num_rows = len(masked_design_df)
+    # masked_design_df = design_df[mask]
+    # num_conditions = len(masked_design_df.columns)
+    # num_rows = len(masked_design_df)
 
-    dmat_grid_rows = num_rows//10
-    fig_width, fig_height = num_conditions, (dmat_grid_rows+ num_conditions)
+    # dmat_grid_rows = num_rows//10
+    # fig_width, fig_height = num_conditions, (dmat_grid_rows+ num_conditions)
     
     design_plot_file = replace_entities(
         file=design_matrix,
@@ -68,10 +62,10 @@ def plot_design_matrix(design_matrix, tmask_file=None):
         entities={"ext": ".png", "path": None, "suffix":"design-corr"}
     )
 
-    plot_design_matrix(masked_design_df, 
+    plot_design_matrix(design_df, 
                        output_file=design_plot_file)
 
-    plot_design_matrix_correlation(masked_design_df, 
+    plot_design_matrix_correlation(design_df, 
                                    output_file=design_corr_file, 
                                    title="Condition Correlations")
 
