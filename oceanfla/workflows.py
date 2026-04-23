@@ -675,10 +675,6 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
                 ])
             ])
 
-            # # Connect the output of the run-level workflow to the merging node
-            # for out_key in run_level_wf.get_node("outputnode").outputs.get().keys():
-            #     workflow.connect(run_level_wf, f"outputnode.{out_key}",
-            #                      input_merging_node, f"{out_key}_x{input_num}")
             input_num += 1
 
     ## DO STUFF AFTER THE RUN-LEVEL WORKFLOWS ###
@@ -720,6 +716,52 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
     workflow.connect([
         (regression_wf, beta_weights_ds, [
             ("outputnode.beta_files", "in_file"),
+            ("outputnode.beta_labels", "condition"),
+            ("outputnode.execute", "execute")
+        ])
+    ])
+
+    t_stat_ds = Node(
+        FLADataSink(
+            base_directory=all_opts.datasink_path.parent,
+            out_path_base=all_opts.datasink_path.name,
+            compress=need_compress,
+            extra_bids_patterns=all_opts.bids_patterns,
+            dismiss_entities=["desc", "run", "den"],
+            suffix="boldmap",
+            stat="t",
+            task=all_opts.task_rename,
+            allowed_entities=("condition", "stat"),
+            source_file=bold_runs_list
+        ),
+        name=f"{func_space}_t_stat_ds"
+    )
+    workflow.connect([
+        (regression_wf, t_stat_ds, [
+            ("outputnode.tstat_files", "in_file"),
+            ("outputnode.beta_labels", "condition"),
+            ("outputnode.execute", "execute")
+        ])
+    ])
+
+    p_val_ds = Node(
+        FLADataSink(
+            base_directory=all_opts.datasink_path.parent,
+            out_path_base=all_opts.datasink_path.name,
+            compress=need_compress,
+            extra_bids_patterns=all_opts.bids_patterns,
+            dismiss_entities=["desc", "run", "den"],
+            suffix="boldmap",
+            stat="p",
+            task=all_opts.task_rename,
+            allowed_entities=("condition", "stat"),
+            source_file=bold_runs_list
+        ),
+        name=f"{func_space}_p_val_ds"
+    )
+    workflow.connect([
+        (regression_wf, p_val_ds, [
+            ("outputnode.pval_files", "in_file"),
             ("outputnode.beta_labels", "condition"),
             ("outputnode.execute", "execute")
         ])
@@ -780,6 +822,50 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
             ("outputnode.bold_file", "in_file"),
             ("outputnode.execute", "execute")
         ]),
+    ])
+
+    r_squared_ds = Node(
+        FLADataSink(
+            base_directory=all_opts.datasink_path.parent,
+            out_path_base=all_opts.datasink_path.name,
+            compress=need_compress,
+            extra_bids_patterns=all_opts.bids_patterns,
+            dismiss_entities=["desc", "run", "den"],
+            suffix="boldmap",
+            stat="Rsquared",
+            task=all_opts.task_rename,
+            allowed_entities=("stat",),
+            source_file=bold_runs_list
+        ),
+        name=f"{func_space}_r_squared_ds"
+    )
+    workflow.connect([
+        (regression_wf, r_squared_ds, [
+            ("outputnode.r_squared_file", "in_file"),
+            ("outputnode.execute", "execute")
+        ])
+    ])
+
+    mse_ds = Node(
+        FLADataSink(
+            base_directory=all_opts.datasink_path.parent,
+            out_path_base=all_opts.datasink_path.name,
+            compress=need_compress,
+            extra_bids_patterns=all_opts.bids_patterns,
+            dismiss_entities=["desc", "run", "den"],
+            suffix="boldmap",
+            stat="MSE",
+            task=all_opts.task_rename,
+            allowed_entities=("stat",),
+            source_file=bold_runs_list
+        ),
+        name=f"{func_space}_mse_ds"
+    )
+    workflow.connect([
+        (regression_wf, mse_ds, [
+            ("outputnode.mse_file", "in_file"),
+            ("outputnode.execute", "execute")
+        ])
     ])
 
     design_ds = Node(
@@ -845,6 +931,62 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
             ("outputnode.execute", "execute"),
         ]),
     ])
+
+    if all_opts.fd_censoring:
+        tmask_to_tsv_node = Node(
+            Function(
+                function=make_tmask_tsv,
+                input_names=["tmask_file", "fd_threshold"],
+                output_names=["tmask_tsv"]
+            ),
+            name=f"{func_space}_tmask_to_tsv_node"
+        )
+        tmask_to_tsv_node.inputs.fd_threshold = all_opts.fd_threshold
+        tmask_ds = Node(
+            FLADataSink(
+                base_directory=all_opts.datasink_path.parent,
+                out_path_base=all_opts.datasink_path.name,
+                extra_bids_patterns=all_opts.bids_patterns,
+                dismiss_entities=["desc", "run", "den"],
+                suffix="tmask",
+                task=all_opts.task_rename,
+                source_file=bold_runs_list
+            ),
+            name=f"{func_space}_tmask_ds"
+        )
+        workflow.connect([
+            (regression_wf, tmask_to_tsv_node, [
+                ("outputnode.tmask_file", "tmask_file")
+            ]),
+            (tmask_to_tsv_node, tmask_ds, [
+                ("tmask_tsv", "in_file")
+            ]),
+            (regression_wf, tmask_ds, [
+                ("outputnode.execute", "execute")
+            ])
+        ])
+
+        unmasked_design_ds = Node(
+            FLADataSink(
+                base_directory=all_opts.datasink_path.parent,
+                out_path_base=all_opts.datasink_path.name,
+                extra_bids_patterns=all_opts.bids_patterns,
+                dismiss_entities=["run", "den"],
+                desc="unmasked",
+                space=func_space,
+                suffix="design",
+                task=all_opts.task_rename,
+                source_file=bold_runs_list
+            ),
+            name=f"{func_space}_unmasked_design_ds"
+        )
+        workflow.connect([
+            (regression_wf, unmasked_design_ds, [
+                ("outputnode.unmasked_design_matrix", "in_file"),
+                ("outputnode.execute", "execute")
+            ])
+        ])
+
 
     return workflow
 
@@ -1138,9 +1280,14 @@ def build_regression_workflow(task:str, run=None, regression_columns=None, need_
         IdentityInterface(
             fields=[
                 "beta_files",
+                "tstat_files",
+                "pval_files",
                 "beta_labels",
                 "bold_file",
+                "r_squared_file",
+                "mse_file",
                 "design_matrix",
+                "unmasked_design_matrix",
                 "tmask_file",
                 "execute"
             ]
@@ -1182,20 +1329,30 @@ def build_regression_workflow(task:str, run=None, regression_columns=None, need_
             ("execute", "execute")
         ]),
         (concat_data_node, outputnode, [
-            ("design_matrix", "design_matrix"),
-            ("tmask_file", "tmask_file"),
+            ("design_matrix", "unmasked_design_matrix"),
             ("execute", "execute")
         ]),
         (glm_node, outputnode, [
             ("residual_bold_file", "bold_file"),
+            ("masked_design_matrix", "design_matrix"),
             ("beta_files", "beta_files"),
+            ("tstat_files", "tstat_files"),
+            ("pval_files", "pval_files"),
             ("beta_labels", "beta_labels"),
+            ("r_squared_file", "r_squared_file"),
+            ("mse_file", "mse_file")
         ])
     ])
 
     if all_opts.fd_censoring:
-        workflow.connect(inputnode, "tmask_files",
-                         concat_data_node, "tmask_files_in")
+        workflow.connect([
+            (inputnode, concat_data_node, [
+                ("tmask_files", "tmask_files_in")
+            ]),
+            (concat_data_node, outputnode, [
+                ("tmask_file", "tmask_file"),
+            ])
+        ])
     else:
         concat_data_node.inputs.tmask_files_in = None
 
@@ -1393,7 +1550,6 @@ def build_reporting_workflow(task:str):
     workflow.connect([
         (inputnode, plot_design_node, [
             ("design_matrix", "design_matrix"),
-            ("tmask_file", "tmask_file"),
             ("execute", "execute")
         ]),
         (plot_design_node, outputnode, [
