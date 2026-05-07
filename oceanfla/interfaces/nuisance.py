@@ -24,7 +24,7 @@ class _GenerateNuisanceMatrixInputSpec(BaseInterfaceInputSpec):
         desc="Whether or not to include linear trend in the nuisance matrix."
     )
     spike_threshold = traits.Union(
-        traits.Str(), None, default_value=None,
+        None, traits.Str(), default_value=None,
         desc="The framewise displacement threshold used when censoring high-motion frames"
     )
     volterra_columns = traits.List(
@@ -100,7 +100,7 @@ def generate_nuisance_matrix(confounds_file: str,
                 nuisance[spike_col] = 0
                 nuisance.loc[a, spike_col] = 1
                 b += 1
-    if "framewise_displacement" not in confounds_columns:
+    if ("framewise_displacement" not in confounds_columns) and ("framewise_displacement" in nuisance.columns.to_list()):
         nuisance.drop(columns="framewise_displacement", inplace=True)
     if demean:
         nuisance[make_regressor_run_specific("mean", bids_source_file=confounds_file)] = 1
