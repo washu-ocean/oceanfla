@@ -51,7 +51,7 @@ space.
 '''
 
 
-def build_oceanfla_wf(subjects: list[str] | str | None, base_dir=Path | str):
+def build_oceanfla_wf(subjects: list[str] | str | None, base_dir:Path | str):
 
     tasks = all_opts.task
     wf_name = f"oceanfla_task_{all_opts.task_rename}_wf"
@@ -936,7 +936,7 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
         tmask_to_tsv_node = Node(
             Function(
                 function=make_tmask_tsv,
-                input_names=["tmask_file", "fd_threshold"],
+                input_names=["tmask_file", "fd_threshold", "execute"],
                 output_names=["tmask_tsv"]
             ),
             name=f"{func_space}_tmask_to_tsv_node"
@@ -955,6 +955,9 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
             name=f"{func_space}_tmask_ds"
         )
         workflow.connect([
+            (regression_wf, tmask_to_tsv_node, [
+                ("outputnode.execute", "execute")
+            ])
             (regression_wf, tmask_to_tsv_node, [
                 ("outputnode.tmask_file", "tmask_file")
             ]),

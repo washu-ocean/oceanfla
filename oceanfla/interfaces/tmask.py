@@ -201,11 +201,13 @@ def find_dscans_file(dscans_dir:str,
     return selected_dscans_file
 
 
-def make_tmask_tsv(tmask_file:str, fd_threshold:float):
+def make_tmask_tsv(tmask_file:str, fd_threshold:float, execute:bool=True):
     import numpy as np
     import pandas as pd
     from oceanfla.utilities import replace_entities
-
+    
+    if not execute:
+        return None
     tmask_data = np.loadtxt(tmask_file)
     tmask_df = pd.DataFrame(columns=[f"{str(fd_threshold)}mm_tmask"], data=tmask_data)
     out_file = replace_entities(
