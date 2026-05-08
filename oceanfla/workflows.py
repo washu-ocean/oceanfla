@@ -441,7 +441,7 @@ def build_ses_design_wf(run, task):
     make_tmask_tsv_node = Node(
         Function(
             function=make_tmask_tsv,
-            input_names=["tmask_file", "fd_threshold"],
+            input_names=["tmask_file", "fd_threshold", "execute"],
             output_names=["tmask_tsv"]
         ),
         name="make_tmask_tsv_node"
@@ -957,7 +957,7 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
         workflow.connect([
             (regression_wf, tmask_to_tsv_node, [
                 ("outputnode.execute", "execute")
-            ])
+            ]),
             (regression_wf, tmask_to_tsv_node, [
                 ("outputnode.tmask_file", "tmask_file")
             ]),
