@@ -61,7 +61,7 @@ class MakeTmask(SimpleInterface):
     
 
 def make_tmask(confounds_file: Path | str,
-               fd_threshold: int,
+               fd_threshold: float,
                minimum_unmasked_neighbors: int,
                start_censoring: int,
                dscans_file: str = None):

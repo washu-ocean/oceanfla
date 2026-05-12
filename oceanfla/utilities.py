@@ -149,7 +149,7 @@ def is_nifti_file(file: str|Path) -> str|None:
 
 def create_image_like(data: np.ndarray,
                  out_file: str|Path,
-                 source_header = None,
+                 source_header: str|Path|nib.cifti2.cifti2.Cifti2Header,
                  scalar_axis:list[str] = None,
                  brain_mask: str = None):
     
@@ -192,26 +192,26 @@ def create_image_like(data: np.ndarray,
     """
 
     data_img = None
-    if source_header:
-        wrong_type = True
-        if isinstance(source_header, str) or isinstance(source_header, Path):
-            source_header = nib.load(source_header).header
-            wrong_type = False
-        if isinstance(source_header, nib.cifti2.cifti2.Cifti2Header):
-            wrong_type = False
-            step_size = getattr(source_header.get_axis(0), "step") if hasattr(source_header.get_axis(0), "step") else 1
-            ax0 = ( 
-                nib.cifti2.cifti2_axes.ScalarAxis(name=scalar_axis) 
-                    ) if  scalar_axis else (
-                nib.cifti2.cifti2_axes.SeriesAxis(start=0, step=step_size, size=data.shape[0]) 
-                )
-            
-            data_img = nib.cifti2.cifti2.Cifti2Image(data, (ax0, source_header.get_axis(1)))
-        if wrong_type:
-            raise ValueError("source_header must be one of the following types: [str, pathlib.Path, nibabel.cifti2.cifti2.Cifti2Header]")
+    wrong_type = True
+    if isinstance(source_header, str) or isinstance(source_header, Path):
+        source_header = nib.load(source_header).header
+        wrong_type = False
+    if isinstance(source_header, nib.cifti2.cifti2.Cifti2Header):
+        wrong_type = False
+        step_size = getattr(source_header.get_axis(0), "step") if hasattr(source_header.get_axis(0), "step") else 1
+        ax0 = ( 
+            nib.cifti2.cifti2_axes.ScalarAxis(name=scalar_axis) 
+                ) if  scalar_axis else (
+            nib.cifti2.cifti2_axes.SeriesAxis(start=0, step=step_size, size=data.shape[0]) 
+            )
+        
+        data_img = nib.cifti2.cifti2.Cifti2Image(data, (ax0, source_header.get_axis(1)))
+    if wrong_type:
+        raise ValueError("source_header must be one of the following types: [str, pathlib.Path, nibabel.cifti2.cifti2.Cifti2Header]")
         
     if brain_mask and data_img is None:
         data_img = nmask.unmask(data, brain_mask)
+        data_img.set_data_dtype(source_header.get_data_dtype())
     
     if data_img is None:
         raise ValueError("Must supply either the brain_mask argument (for NIFTI) or an accepted source_header argument (for CIFTI), but neither were found")
