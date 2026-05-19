@@ -6,6 +6,7 @@ from nipype.interfaces.base import (
     TraitedSpec,
     traits,
 )
+from pandas import isna
 
 class _MakeTmaskInputSpec(BaseInterfaceInputSpec):
     confounds_file = File(
@@ -79,6 +80,8 @@ def make_tmask(confounds_file: Path | str,
     df = pd.read_csv(confounds_file, sep="\t")
 
     fd_arr = df.loc[:, "framewise_displacement"].to_numpy()
+    if np.isnan(fd_arr[0]):
+        fd_arr[0] = 0
     if minimum_unmasked_neighbors > 0:
         fd_arr_padded = np.pad(fd_arr, pad_width := minimum_unmasked_neighbors)
         fd_mask = np.full(len(fd_arr_padded), False)
@@ -199,6 +202,73 @@ def find_dscans_file(dscans_dir:str,
     else:
         logger.info(f"did not find any dcans file for source file <{source_bids}>")
     return selected_dscans_file
+
+
+class RemoveMotionMaskingInputSpec(BaseInterfaceInputSpec):
+    tmask_file = traits.Union(
+        traits.List(
+            trait=traits.File(
+                exists=True
+            )
+        ),
+        traits.File(
+            exists=True
+        ),
+        desc="a run-level tmask file or a list of them"
+    )
+    start_censoring = traits.Int(
+        0,
+        desc="Number of frames to censor out automatically at the beginning of each run."
+    )
+
+
+class RemoveMotionMaskingOutputSpec(TraitedSpec):
+    tmask_file = traits.Union(
+        traits.List(
+            trait=traits.File(
+                exists=True
+            )
+        ),
+        traits.File(
+            exists=True
+        ),
+        desc="a run-level tmask file or a list of them only including the start-censoring"
+    )
+
+
+class RemoveMotionMasking(SimpleInterface):
+    input_spec = RemoveMotionMaskingInputSpec
+    output_spec = RemoveMotionMaskingOutputSpec
+
+    def _run_interface(self, runtime):
+
+        self._results["tmask_file"] = remove_motion_masking(
+            tmask_file=self.inputs.tmask_file,
+            start_censoring=self.inputs.start_censoring
+        )
+        return runtime
+
+
+def remove_motion_masking(tmask_file: str|list,
+                          start_censoring: int):
+    import numpy as np
+    from bids.utils import listify
+    from oceanfla.utilities import replace_entities
+
+    tmask_file_list = listify(tmask_file)
+    out_list = []
+    for tfile in tmask_file_list:
+        tmask = np.loadtxt(tfile)
+        tmask[start_censoring:] = 1
+        out_path = replace_entities(
+            file=tfile,
+            entities={"desc": "noMotion", "path": None}
+        )
+        np.savetxt(out_path, tmask)
+        out_list.append(out_path)
+
+    return out_list if len(out_list) > 1 else out_list[0]
+    
 
 
 def make_tmask_tsv(tmask_file:str, fd_threshold:float, execute:bool=True):

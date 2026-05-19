@@ -106,84 +106,6 @@ class RunGLMRegression(OptionalInterface):
         return runtime
 
 
-class ConcatRegressionDataInputSpec(OptionalInterfaceSpec):
-    bold_files_in = traits.Union(
-        traits.List(),
-        traits.File(exists=True),
-        desc="A list of functional data files"
-    )
-    design_matrices_in = traits.Union(
-        traits.List(),
-        traits.File(exists=True),
-        desc="A list of event matrix files"
-    )
-    tmask_files_in = event_matrices = traits.Union(
-        traits.List(),
-        None,
-        traits.File(exists=True),
-        desc="A list of temporal mask files "
-    )
-    inclusion_list = traits.List(
-        trait=traits.Bool,
-        desc="A list of boolean values to indicate inclusion in the final concatenated data"
-    )
-    include_intercept = traits.Bool(
-        default_value=True,
-        desc=""
-    )
-    task = traits.Str(
-        desc="The task that this regression is for"
-    )
-    brain_mask = traits.Union(
-        traits.File(exists=True),
-        None,
-        default_value=None,
-        desc="The brain mask that accompanies volumetric data"
-    )
-
-
-class ConcatRegressionDataOutputSpec(OptionalInterfaceSpec):
-    bold_file = traits.Union(
-        None,
-        traits.File(exists=True),
-        desc=""
-    )
-    design_matrix = traits.Union(
-        None,
-        traits.File(exists=True),
-        desc=""
-    )
-    tmask_file = traits.Union(
-        None,
-        traits.File(exists=True),
-        desc="The concatenation of the input list 'tmask_files_in'"
-    )
-
-
-class ConcatRegressionData(OptionalInterface):
-    input_spec = ConcatRegressionDataInputSpec
-    output_spec = ConcatRegressionDataOutputSpec
-
-    def _run_interface(self, runtime):
-        from bids.utils import listify
-
-        func_files = listify(self.inputs.bold_files_in)
-        design_matrices = listify(self.inputs.design_matrices_in)
-        tmask_files = listify(self.inputs.tmask_files_in)
-
-        self._results["bold_file"], self._results["design_matrix"], self._results["tmask_file"], self._results["execute"] = combine_regression_data(
-            func_list=func_files,
-            design_matrix_files=design_matrices,
-            tmask_files=tmask_files,
-            inclusion_list=self.inputs.inclusion_list,
-            add_intercept=self.inputs.include_intercept,
-            task=self.inputs.task,
-            brain_mask=self.inputs.brain_mask
-        )
-
-        return runtime
-
-
 def massuni_linGLM(func_file: str,
                    design_matrix_file: str,
                    tmask_file: str,
@@ -353,6 +275,84 @@ def massuni_linGLM(func_file: str,
         brain_mask=brain_mask
     )
     return (beta_files, wald_stat_files, pval_files, beta_labels, r_squared_filename, mse_filename, masked_design_file, residual_filename)
+
+
+class ConcatRegressionDataInputSpec(OptionalInterfaceSpec):
+    bold_files_in = traits.Union(
+        traits.List(),
+        traits.File(exists=True),
+        desc="A list of functional data files"
+    )
+    design_matrices_in = traits.Union(
+        traits.List(),
+        traits.File(exists=True),
+        desc="A list of event matrix files"
+    )
+    tmask_files_in = traits.Union(
+        traits.List(),
+        None,
+        traits.File(exists=True),
+        desc="A list of temporal mask files "
+    )
+    inclusion_list = traits.List(
+        trait=traits.Bool,
+        desc="A list of boolean values to indicate inclusion in the final concatenated data"
+    )
+    include_intercept = traits.Bool(
+        default_value=True,
+        desc=""
+    )
+    task = traits.Str(
+        desc="The task that this regression is for"
+    )
+    brain_mask = traits.Union(
+        traits.File(exists=True),
+        None,
+        default_value=None,
+        desc="The brain mask that accompanies volumetric data"
+    )
+
+
+class ConcatRegressionDataOutputSpec(OptionalInterfaceSpec):
+    bold_file = traits.Union(
+        None,
+        traits.File(exists=True),
+        desc=""
+    )
+    design_matrix = traits.Union(
+        None,
+        traits.File(exists=True),
+        desc=""
+    )
+    tmask_file = traits.Union(
+        None,
+        traits.File(exists=True),
+        desc="The concatenation of the input list 'tmask_files_in'"
+    )
+
+
+class ConcatRegressionData(OptionalInterface):
+    input_spec = ConcatRegressionDataInputSpec
+    output_spec = ConcatRegressionDataOutputSpec
+
+    def _run_interface(self, runtime):
+        from bids.utils import listify
+
+        func_files = listify(self.inputs.bold_files_in)
+        design_matrices = listify(self.inputs.design_matrices_in)
+        tmask_files = listify(self.inputs.tmask_files_in)
+
+        self._results["bold_file"], self._results["design_matrix"], self._results["tmask_file"], self._results["execute"] = combine_regression_data(
+            func_list=func_files,
+            design_matrix_files=design_matrices,
+            tmask_files=tmask_files,
+            inclusion_list=self.inputs.inclusion_list,
+            add_intercept=self.inputs.include_intercept,
+            task=self.inputs.task,
+            brain_mask=self.inputs.brain_mask
+        )
+
+        return runtime
 
 
 def combine_regression_data(task: str,
