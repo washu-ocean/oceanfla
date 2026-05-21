@@ -78,45 +78,6 @@ class FilterData(OptionalInterface):
         return runtime
 
 
-
-class PercentChangeInputSpec(OptionalInterfaceSpec):
-    bold_in = File(exists=True, mandatory=True,
-                   desc="A BIDS style bold file")
-
-    tmask_in = File(
-        exists=True, mandatory=True,
-        desc="Run mask (as a .txt)."
-    )
-
-    brain_mask = traits.Union(
-        traits.File(exists=True),
-        None,
-        default_value=None,
-        desc="The brain mask that accompanies volumetric data"
-    )
-
-
-class PercentChangeOutputSpec(OptionalInterfaceSpec):
-    bold_file = File(exists=True,
-                     desc="The functional data after a percent signal change transformation")
-
-
-class PercentChange(OptionalInterface):
-    input_spec = PercentChangeInputSpec
-    output_spec = PercentChangeOutputSpec
-
-    def _run_interface(self, runtime):
-
-        self._results["bold_file"] = percent_signal_change(
-            func_file=self.inputs.bold_in,
-            tmask_file=self.inputs.tmask_in,
-            brain_mask=self.inputs.brain_mask
-        )
-
-        return runtime
-    
-
-
 def filter_data(func_file: str,
                 tmask_file: str,
                 tr: float,
@@ -211,11 +172,50 @@ def filter_data(func_file: str,
     return out_path
 
 
+class PercentChangeInputSpec(OptionalInterfaceSpec):
+    bold_in = File(exists=True, mandatory=True,
+                   desc="A BIDS style bold file")
+
+    tmask_in = File(
+        exists=True, mandatory=True,
+        desc="Run mask (as a .txt)."
+    )
+
+    brain_mask = traits.Union(
+        traits.File(exists=True),
+        None,
+        default_value=None,
+        desc="The brain mask that accompanies volumetric data"
+    )
+
+
+class PercentChangeOutputSpec(OptionalInterfaceSpec):
+    bold_file = File(exists=True,
+                     desc="The functional data after a percent signal change transformation")
+
+
+class PercentChange(OptionalInterface):
+    input_spec = PercentChangeInputSpec
+    output_spec = PercentChangeOutputSpec
+
+    def _run_interface(self, runtime):
+
+        self._results["bold_file"] = percent_signal_change(
+            func_file=self.inputs.bold_in,
+            tmask_file=self.inputs.tmask_in,
+            brain_mask=self.inputs.brain_mask
+        )
+
+        return runtime
+
+
 def percent_signal_change(func_file: str,
                           tmask_file: str,
                           brain_mask: str = None):
     from oceanfla.utilities import load_data, create_image_like, replace_entities
     import numpy as np
+    from oceanfla.config import get_logger
+    logger = get_logger("nipype.interface")
 
     mask = np.loadtxt(tmask_file).astype(bool)
     data = load_data(func_file, brain_mask)
@@ -226,8 +226,8 @@ def percent_signal_change(func_file: str,
     psc_data = ((data - mean) / np.abs(mean)) * 100
     non_valid_indices = np.where(~np.isfinite(psc_data))
     if len(non_valid_indices[0]) > 0:
-        # logger.warning("Found vertices with zero signal, setting these to zero")
-        psc_data[np.where(~np.isfinite(psc_data))] = 0
+        logger.warning("Found vertices with zero signal, setting these to zero")
+        psc_data[non_valid_indices] = 0
 
     out_path = replace_entities(
         file=func_file,

@@ -131,10 +131,12 @@ class ReadMetadataFileInputSpec(BaseInterfaceInputSpec):
         desc="A BIDS image/data file"
     )
 
+
 class ReadMetadataFileOutputSpec(DynamicTraitedSpec):
     metadata_dict = traits.Dict(
         key_trait=traits.Str
     )
+
 
 class ReadMetadataFile(SimpleInterface):
     input_spec = ReadMetadataFileInputSpec
@@ -342,6 +344,7 @@ class FLADataSinkInputSpec(_DerivativesDataSinkInputSpec, OptionalInterfaceSpec)
         None,
         desc="the object to be saved"
     )
+
 
 class FLADataSink(DerivativesDataSink, OptionalInterface):
     input_spec = FLADataSinkInputSpec

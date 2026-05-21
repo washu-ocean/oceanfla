@@ -221,7 +221,7 @@ def _build_parser():
     config_arguments.add_argument("--confounds", "-c", nargs="+", default=[],
                                   help="A list of confounds to include from each confound timeseries tsv file.")
 
-    config_arguments.add_argument("--fd_threshold", "-fd", type=PositiveFloat, default=0.9,
+    config_arguments.add_argument("--fd_threshold", "-fd", type=AboveZeroFloat,
                                   help="The framewise displacement threshold used when censoring high-motion frames")
 
     config_arguments.add_argument("--minimum_unmasked_neighbors", "-mun", type=PositiveInt, default=0,

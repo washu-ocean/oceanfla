@@ -13,8 +13,9 @@ class _MakeTmaskInputSpec(BaseInterfaceInputSpec):
         mandatory=True,
         desc="Path to nuisance matrix (as a .csv or .tsv)"
     )
-    fd_threshold = traits.Float(
-        mandatory=True,
+    fd_threshold = traits.Union(
+        None,
+        traits.Float(),
         desc="FD threshold for masking frames."
     )
     minimum_unmasked_neighbors = traits.Int(
@@ -61,7 +62,7 @@ class MakeTmask(SimpleInterface):
     
 
 def make_tmask(confounds_file: Path | str,
-               fd_threshold: float,
+               fd_threshold: float|None,
                minimum_unmasked_neighbors: int,
                start_censoring: int,
                dscans_file: str = None):
@@ -73,27 +74,33 @@ def make_tmask(confounds_file: Path | str,
         raise ValueError("The 'start_censoring' argument of make_tmask() must be 0 or positive.")
     if minimum_unmasked_neighbors < 0:
         raise ValueError("The 'minimum_unmasked_neighbors' argument of make_tmask() must be 0 or positive.")
-    if fd_threshold < 0:
-        raise ValueError("The 'fd_threshold' argument of make_tmask() must be 0 or positive.")
+    if (fd_threshold is not None) and fd_threshold <= 0:
+        raise ValueError("The 'fd_threshold' argument of make_tmask() must be greater than 0")
 
     df = pd.read_csv(confounds_file, sep="\t")
 
     fd_arr = df.loc[:, "framewise_displacement"].to_numpy()
-    if minimum_unmasked_neighbors > 0:
-        fd_arr_padded = np.pad(fd_arr, pad_width := minimum_unmasked_neighbors)
-        fd_mask = np.full(len(fd_arr_padded), False)
-        for i in range(pad_width, len(fd_arr_padded) - pad_width):
-            if all(fd_arr_padded[range(i - pad_width, i + pad_width + 1)] < fd_threshold):
-                fd_mask[i] = True
-            elif i - pad_width < pad_width and all(fd_arr_padded[range(pad_width, i + pad_width + 1)] < fd_threshold):
-                fd_mask[i] = True
-            elif i + pad_width + 1 > len(fd_arr_padded) - pad_width and all(fd_arr_padded[range(i - pad_width, len(fd_arr_padded) - pad_width)] < fd_threshold):
-                fd_mask[i] = True
-            else:
-                fd_mask[i] = False
-        fd_mask = fd_mask[pad_width:-pad_width]
-    else:
-        fd_mask = fd_arr < fd_threshold
+    if np.isnan(fd_arr[0]):
+        fd_arr[0] = 0
+    if fd_threshold is None:
+        fd_mask = np.full(shape=fd_arr.shape, fill_value=True)
+        fd_threshold="None"
+    else: 
+        if minimum_unmasked_neighbors > 0:
+            fd_arr_padded = np.pad(fd_arr, pad_width := minimum_unmasked_neighbors)
+            fd_mask = np.full(len(fd_arr_padded), False)
+            for i in range(pad_width, len(fd_arr_padded) - pad_width):
+                if all(fd_arr_padded[range(i - pad_width, i + pad_width + 1)] < fd_threshold):
+                    fd_mask[i] = True
+                elif i - pad_width < pad_width and all(fd_arr_padded[range(pad_width, i + pad_width + 1)] < fd_threshold):
+                    fd_mask[i] = True
+                elif i + pad_width + 1 > len(fd_arr_padded) - pad_width and all(fd_arr_padded[range(i - pad_width, len(fd_arr_padded) - pad_width)] < fd_threshold):
+                    fd_mask[i] = True
+                else:
+                    fd_mask[i] = False
+            fd_mask = fd_mask[pad_width:-pad_width]
+        else:
+            fd_mask = fd_arr < fd_threshold
     fd_mask[:start_censoring] = False
 
     if dscans_file:
@@ -201,13 +208,82 @@ def find_dscans_file(dscans_dir:str,
     return selected_dscans_file
 
 
-def make_tmask_tsv(tmask_file:str, fd_threshold:float, execute:bool=True):
+class RemoveMotionMaskingInputSpec(BaseInterfaceInputSpec):
+    tmask_file = traits.Union(
+        traits.List(
+            trait=traits.File(
+                exists=True
+            )
+        ),
+        traits.File(
+            exists=True
+        ),
+        desc="a run-level tmask file or a list of them"
+    )
+    start_censoring = traits.Int(
+        0,
+        desc="Number of frames to censor out automatically at the beginning of each run."
+    )
+
+
+class RemoveMotionMaskingOutputSpec(TraitedSpec):
+    tmask_file = traits.Union(
+        traits.List(
+            trait=traits.File(
+                exists=True
+            )
+        ),
+        traits.File(
+            exists=True
+        ),
+        desc="a run-level tmask file or a list of them only including the start-censoring"
+    )
+
+
+class RemoveMotionMasking(SimpleInterface):
+    input_spec = RemoveMotionMaskingInputSpec
+    output_spec = RemoveMotionMaskingOutputSpec
+
+    def _run_interface(self, runtime):
+
+        self._results["tmask_file"] = remove_motion_masking(
+            tmask_file=self.inputs.tmask_file,
+            start_censoring=self.inputs.start_censoring
+        )
+        return runtime
+
+
+def remove_motion_masking(tmask_file: str|list,
+                          start_censoring: int):
+    import numpy as np
+    from bids.utils import listify
+    from oceanfla.utilities import replace_entities
+
+    tmask_file_list = listify(tmask_file)
+    out_list = []
+    for tfile in tmask_file_list:
+        tmask = np.loadtxt(tfile)
+        tmask[start_censoring:] = 1
+        out_path = replace_entities(
+            file=tfile,
+            entities={"desc": "noMotion", "path": None}
+        )
+        np.savetxt(out_path, tmask)
+        out_list.append(out_path)
+
+    return out_list if len(out_list) > 1 else out_list[0]
+    
+
+
+def make_tmask_tsv(tmask_file:str, fd_threshold:float|None, execute:bool=True):
     import numpy as np
     import pandas as pd
     from oceanfla.utilities import replace_entities
     
     if not execute:
         return None
+    if fd_threshold is None:
+        fd_threshold = "nan_"
     tmask_data = np.loadtxt(tmask_file)
     tmask_df = pd.DataFrame(columns=[f"{str(fd_threshold)}mm_tmask"], data=tmask_data)
     out_file = replace_entities(

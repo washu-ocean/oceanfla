@@ -2,14 +2,14 @@ from nipype import Node, Workflow, Function
 from nipype.interfaces.io import BIDSDataGrabber
 from nipype.interfaces.utility import IdentityInterface, Select
 # from niworkflows.utils.bids import collect_participants
-from oceanfla.interfaces.reporting import PlotDesign
+from oceanfla.interfaces.reporting import PlotDesign, ReportExclusions
 from oceanfla.interfaces.utility import FLADataSink, ReadMetadataFile
 from oceanfla.interfaces.clean import FilterData, PercentChange
 from oceanfla.interfaces.events import EventsMatrix, ModifyEventsFile, get_number_of_volumes
-from oceanfla.interfaces.exclusions import CheckRunRetention, CheckRuntSNR
+from oceanfla.interfaces.exclusions import CheckRunRetention, CheckRuntSNR, MakeRunExclusionTable
 from oceanfla.interfaces.nuisance import GenerateNuisanceMatrix
 from oceanfla.interfaces.regression import CombineFIRBetas, ConcatRegressionData, MakeRunDesign, RunGLMRegression
-from oceanfla.interfaces.tmask import FindDscans, MakeTmask, make_tmask_tsv
+from oceanfla.interfaces.tmask import FindDscans, MakeTmask, RemoveMotionMasking, make_tmask_tsv
 from oceanfla.interfaces.utility import MergeUnique, ExtractDataGroup
 from oceanfla.config import all_opts, get_bids_file, get_logger
 from oceanfla.interfaces.workbench_utils import CiftiParcellate, VolumeSmooth, SurfaceSmooth
@@ -217,6 +217,9 @@ def build_session_wf(subject, session=None):
                 (extract_task_run_souce_node, ses_design_wf, [
                     ("confounds", "inputnode.confounds_file"),
                     ("events", "inputnode.events_file"),
+                ]),
+                (extract_task_run_souce_node, design_merging_node, [
+                    ("confounds", f"confounds_x{run}")
                 ])
             ])
 
@@ -242,7 +245,8 @@ def build_session_wf(subject, session=None):
         (design_merging_node, func_space_wf, [
             ("main_design", "inputnode.main_design_files"),
             ("nuisance_design", "inputnode.nuisance_design_files"),
-            ("tmask_file", "inputnode.tmask_files")
+            ("tmask_file", "inputnode.tmask_files"),
+            ("confounds", "inputnode.confounds_files")
         ])
     ])
 
@@ -523,7 +527,8 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
                 "session",
                 "main_design_files",
                 "tmask_files",
-                "nuisance_design_files"
+                "nuisance_design_files",
+                "confounds_files"
             ]
         ),
         name="inputnode"
@@ -613,7 +618,8 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
                 (inputnode, extract_task_run_design_node, [
                     ("main_design_files", "main_design"),
                     ("nuisance_design_files", "nuisance_design"),
-                    ("tmask_files", "tmask_file")
+                    ("tmask_files", "tmask_file"),
+                    ("confounds_files", "confounds")
                 ])
             ])
 
@@ -668,10 +674,12 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
                 ]),
                 (extract_task_run_design_node, input_merging_node, [
                     ("tmask_file", f"tmask_file_x{input_num}"),
-                    ("main_design", f"design_matrix_x{input_num}")
+                    ("main_design", f"design_matrix_x{input_num}"),
+                    ("confounds", f"confounds_x{input_num}")
                 ]),
                 (run_exclusion_wf, input_merging_node, [
-                    ("outputnode.include", f"include_x{input_num}")
+                    ("outputnode.include", f"include_x{input_num}"),
+                    ("outputnode.exclusion_table", f"exclusion_table_x{input_num}")
                 ])
             ])
 
@@ -896,15 +904,35 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
         ),
         name=f"{func_space}_design_corr_ds"
     )
+    inclusion_report_ds = Node(
+        FLADataSink(
+            base_directory=all_opts.datasink_path.parent,
+            out_path_base=all_opts.datasink_path.name,
+            extra_bids_patterns=all_opts.bids_patterns,
+            dismiss_entities=["run", "den"],
+            desc="inclusion",
+            space=func_space,
+            suffix="report",
+            task=all_opts.task_rename,
+            source_file=bold_runs_list
+        ),
+        name=f"{func_space}_inclusion_report_ds"
+    )
 
     # TODO: add Report workflow
     reporting_wf = build_reporting_workflow(task=all_opts.task_rename)
     workflow.connect([
         (regression_wf, reporting_wf, [
             ("outputnode.design_matrix", "inputnode.design_matrix"),
-            ("outputnode.tmask_file", "inputnode.tmask_file"),
+            ("outputnode.tmask_file", "inputnode.ses_tmask_file"),
             ("outputnode.execute", "inputnode.execute")
         ]),
+        (input_merging_node, reporting_wf, [
+            ("tmask_file", "inputnode.run_tmask_files"),
+            ("confounds", "inputnode.confounds_files"),
+            ("include", "inputnode.inclusion_list"),
+            ("exclusion_table", "inputnode.exclusion_tables")
+        ])
     ])
 
     design_merging_node = Node(
@@ -930,65 +958,68 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
         (regression_wf, design_corr_ds, [
             ("outputnode.execute", "execute"),
         ]),
+        (reporting_wf, inclusion_report_ds, [
+            ("outputnode.exclusion_report", "in_file")
+        ])
     ])
 
-    if all_opts.fd_censoring:
-        tmask_to_tsv_node = Node(
-            Function(
-                function=make_tmask_tsv,
-                input_names=["tmask_file", "fd_threshold", "execute"],
-                output_names=["tmask_tsv"]
-            ),
-            name=f"{func_space}_tmask_to_tsv_node"
-        )
-        tmask_to_tsv_node.inputs.fd_threshold = all_opts.fd_threshold
-        tmask_ds = Node(
-            FLADataSink(
-                base_directory=all_opts.datasink_path.parent,
-                out_path_base=all_opts.datasink_path.name,
-                extra_bids_patterns=all_opts.bids_patterns,
-                dismiss_entities=["desc", "run", "den"],
-                suffix="tmask",
-                task=all_opts.task_rename,
-                source_file=bold_runs_list
-            ),
-            name=f"{func_space}_tmask_ds"
-        )
-        workflow.connect([
-            (regression_wf, tmask_to_tsv_node, [
-                ("outputnode.execute", "execute")
-            ]),
-            (regression_wf, tmask_to_tsv_node, [
-                ("outputnode.tmask_file", "tmask_file")
-            ]),
-            (tmask_to_tsv_node, tmask_ds, [
-                ("tmask_tsv", "in_file")
-            ]),
-            (regression_wf, tmask_ds, [
-                ("outputnode.execute", "execute")
-            ])
+    # save the session-level tmask
+    tmask_to_tsv_node = Node(
+        Function(
+            function=make_tmask_tsv,
+            input_names=["tmask_file", "fd_threshold", "execute"],
+            output_names=["tmask_tsv"]
+        ),
+        name=f"{func_space}_tmask_to_tsv_node"
+    )
+    tmask_to_tsv_node.inputs.fd_threshold = all_opts.fd_threshold
+    tmask_ds = Node(
+        FLADataSink(
+            base_directory=all_opts.datasink_path.parent,
+            out_path_base=all_opts.datasink_path.name,
+            extra_bids_patterns=all_opts.bids_patterns,
+            dismiss_entities=["desc", "run", "den"],
+            suffix="tmask",
+            task=all_opts.task_rename,
+            source_file=bold_runs_list
+        ),
+        name=f"{func_space}_tmask_ds"
+    )
+    workflow.connect([
+        (regression_wf, tmask_to_tsv_node, [
+            ("outputnode.execute", "execute")
+        ]),
+        (regression_wf, tmask_to_tsv_node, [
+            ("outputnode.tmask_file", "tmask_file")
+        ]),
+        (tmask_to_tsv_node, tmask_ds, [
+            ("tmask_tsv", "in_file")
+        ]),
+        (regression_wf, tmask_ds, [
+            ("outputnode.execute", "execute")
         ])
+    ])
 
-        unmasked_design_ds = Node(
-            FLADataSink(
-                base_directory=all_opts.datasink_path.parent,
-                out_path_base=all_opts.datasink_path.name,
-                extra_bids_patterns=all_opts.bids_patterns,
-                dismiss_entities=["run", "den"],
-                desc="unmasked",
-                space=func_space,
-                suffix="design",
-                task=all_opts.task_rename,
-                source_file=bold_runs_list
-            ),
-            name=f"{func_space}_unmasked_design_ds"
-        )
-        workflow.connect([
-            (regression_wf, unmasked_design_ds, [
-                ("outputnode.unmasked_design_matrix", "in_file"),
-                ("outputnode.execute", "execute")
-            ])
+    unmasked_design_ds = Node(
+        FLADataSink(
+            base_directory=all_opts.datasink_path.parent,
+            out_path_base=all_opts.datasink_path.name,
+            extra_bids_patterns=all_opts.bids_patterns,
+            dismiss_entities=["run", "den"],
+            desc="unmasked",
+            space=func_space,
+            suffix="design",
+            task=all_opts.task_rename,
+            source_file=bold_runs_list
+        ),
+        name=f"{func_space}_unmasked_design_ds"
+    )
+    workflow.connect([
+        (regression_wf, unmasked_design_ds, [
+            ("outputnode.unmasked_design_matrix", "in_file"),
+            ("outputnode.execute", "execute")
         ])
+    ])
 
 
     return workflow
@@ -1333,7 +1364,8 @@ def build_regression_workflow(task:str, run=None, regression_columns=None, need_
         ]),
         (concat_data_node, outputnode, [
             ("design_matrix", "unmasked_design_matrix"),
-            ("execute", "execute")
+            ("execute", "execute"),
+            ("tmask_file", "tmask_file")
         ]),
         (glm_node, outputnode, [
             ("residual_bold_file", "bold_file"),
@@ -1351,13 +1383,23 @@ def build_regression_workflow(task:str, run=None, regression_columns=None, need_
         workflow.connect([
             (inputnode, concat_data_node, [
                 ("tmask_files", "tmask_files_in")
-            ]),
-            (concat_data_node, outputnode, [
-                ("tmask_file", "tmask_file"),
             ])
         ])
     else:
-        concat_data_node.inputs.tmask_files_in = None
+        remove_motion_masking_node = Node(
+            RemoveMotionMasking(
+                start_censoring=all_opts.start_censoring
+            ),
+            name="remove_motion_masking_node"
+        )
+        workflow.connect([
+            (inputnode, remove_motion_masking_node, [
+                ("tmask_files", "tmask_file")
+            ]),
+            (remove_motion_masking_node, concat_data_node, [
+                ("tmask_file", "tmask_files_in")
+            ])
+        ])
 
     return workflow
 
@@ -1377,7 +1419,8 @@ def build_exclusion_wf(run, task):
     outputnode = Node(
         IdentityInterface(
             fields=[
-                "include"
+                "include",
+                "exclusion_table"
             ]
         ),
         name="outputnode"
@@ -1404,6 +1447,15 @@ def build_exclusion_wf(run, task):
             start_censoring=all_opts.start_censoring
         ),
         name="check_frame_retention_node"
+    )
+
+    exclusion_table_node = Node(
+        MakeRunExclusionTable(
+            run=run,
+            task=task,
+            start_censoring=all_opts.start_censoring
+        ),
+        name="make_run_exclusion_table"
     )
 
     def and_all_func(validation_list): return all(validation_list)
@@ -1435,6 +1487,22 @@ def build_exclusion_wf(run, task):
         ]),
         (check_validation_node, outputnode, [
             ("include", "include")
+        ]),
+        (frame_retention_check_node, exclusion_table_node, [
+            ("valid", "frame_retention_valid"),
+            ("retention_percentage", "retention_percentage"),
+            ("frames_retained", "frames_retained"),
+            ("total_frames", "total_frames")
+        ]),
+        (tsnr_check_node, exclusion_table_node, [
+            ("valid", "tsnr_valid"),
+            ("whole_brain_tsnr", "whole_brain_tsnr")
+        ]),
+        (check_validation_node, exclusion_table_node, [
+            ("include", "included")
+        ]),
+        (exclusion_table_node, outputnode, [
+            ("exclusion_table", "exclusion_table")
         ])
     ])
 
@@ -1527,8 +1595,12 @@ def build_reporting_workflow(task:str):
         IdentityInterface(
             fields=[
                 "design_matrix",
-                "tmask_file",
-                "execute"
+                "ses_tmask_file",
+                "execute",
+                "run_tmask_files",
+                "confounds_files",
+                "inclusion_list",
+                "exclusion_tables"
             ]
         ),
         name="inputnode"
@@ -1540,6 +1612,7 @@ def build_reporting_workflow(task:str):
             fields=[
                 "design_plot",
                 "design_correlations",
+                "exclusion_report"
             ]
         ),
         name="outputnode"
@@ -1550,6 +1623,13 @@ def build_reporting_workflow(task:str):
         name="plot_design_node"
     )
 
+    report_exclusions_node = Node(
+        ReportExclusions(
+            task=task
+        ),
+        name="report_exclusions_node"
+    )
+
     workflow.connect([
         (inputnode, plot_design_node, [
             ("design_matrix", "design_matrix"),
@@ -1558,6 +1638,16 @@ def build_reporting_workflow(task:str):
         (plot_design_node, outputnode, [
             ("design_plot", "design_plot"),
             ("design_correlations", "design_correlations")
+        ]),
+        (inputnode, report_exclusions_node, [
+            ("exclusion_tables", "exclusion_tables"),
+            ("run_tmask_files", "tmask_files"),
+            ("confounds_files", "confounds_files"),
+            ("inclusion_list", "inclusion_list"),
+            ("ses_tmask_file", "ses_tmask_file")
+        ]), 
+        (report_exclusions_node, outputnode, [
+            ("exclusion_report", "exclusion_report")
         ])
     ])
 
