@@ -1,5 +1,4 @@
 from pathlib import Path
-from networkx import desargues_graph
 from nipype.interfaces.base import (
     BaseInterfaceInputSpec,
     File,
@@ -7,7 +6,6 @@ from nipype.interfaces.base import (
     TraitedSpec,
     traits,
 )
-from sqlalchemy import desc
 
 
 class CheckRunRetentionInputSpec(BaseInterfaceInputSpec):
