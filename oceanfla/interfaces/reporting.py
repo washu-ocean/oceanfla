@@ -151,8 +151,8 @@ def make_exclusion_report(task: str,
         tmask = np.loadtxt(tmask_files[i]).astype(bool)
         avg_fd = np.nanmean(fd)
         avg_masked_fd = np.nanmean(fd[tmask])
-        excl_df.loc[0, "Avg FD"] = avg_fd
-        excl_df.loc[0, "Avg FD (after tmask)"] = avg_masked_fd
+        excl_df.loc[0, "Avg FD (mm)"] = avg_fd
+        excl_df.loc[0, "Avg FD after tmask (mm)"] = avg_masked_fd
         exclusion_df_list.append(excl_df)
         if inclusion_list[i]:
             ses_fd_list.append(fd)
@@ -185,7 +185,7 @@ def make_exclusion_report(task: str,
                 f"Length of confounds and reported frames is different"
             )
         avg_ses_fd = np.nanmean(ses_fd)
-        exclusion_report.loc[ses_index, "Avg FD"] = avg_ses_fd
+        exclusion_report.loc[ses_index, "Avg FD (mm)"] = avg_ses_fd
         if not ses_tmask:
             raise ValueError(
                 "Session-level GLM was run, but no session-level tmask was provided"
@@ -196,7 +196,7 @@ def make_exclusion_report(task: str,
                 f"Length of session tmask and reported frames is different"
             )
         avg_ses_masked_fd = np.nanmean(ses_fd[ses_level_tmask])
-        exclusion_report.loc[ses_index, "Avg FD (after tmask)"] = avg_ses_masked_fd
+        exclusion_report.loc[ses_index, "Avg FD after tmask (mm)"] = avg_ses_masked_fd
 
         ses_frames_retained = np.nansum(ses_level_tmask)
         ses_perc_frames_retained = (ses_frames_retained / total_non_censored_frames) * 100

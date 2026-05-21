@@ -6,7 +6,6 @@ from nipype.interfaces.base import (
     TraitedSpec,
     traits,
 )
-from pandas import isna
 
 class _MakeTmaskInputSpec(BaseInterfaceInputSpec):
     confounds_file = File(
@@ -14,8 +13,9 @@ class _MakeTmaskInputSpec(BaseInterfaceInputSpec):
         mandatory=True,
         desc="Path to nuisance matrix (as a .csv or .tsv)"
     )
-    fd_threshold = traits.Float(
-        mandatory=True,
+    fd_threshold = traits.Union(
+        None,
+        traits.Float(),
         desc="FD threshold for masking frames."
     )
     minimum_unmasked_neighbors = traits.Int(
@@ -62,7 +62,7 @@ class MakeTmask(SimpleInterface):
     
 
 def make_tmask(confounds_file: Path | str,
-               fd_threshold: float,
+               fd_threshold: float|None,
                minimum_unmasked_neighbors: int,
                start_censoring: int,
                dscans_file: str = None):
@@ -74,29 +74,33 @@ def make_tmask(confounds_file: Path | str,
         raise ValueError("The 'start_censoring' argument of make_tmask() must be 0 or positive.")
     if minimum_unmasked_neighbors < 0:
         raise ValueError("The 'minimum_unmasked_neighbors' argument of make_tmask() must be 0 or positive.")
-    if fd_threshold < 0:
-        raise ValueError("The 'fd_threshold' argument of make_tmask() must be 0 or positive.")
+    if (fd_threshold is not None) and fd_threshold <= 0:
+        raise ValueError("The 'fd_threshold' argument of make_tmask() must be greater than 0")
 
     df = pd.read_csv(confounds_file, sep="\t")
 
     fd_arr = df.loc[:, "framewise_displacement"].to_numpy()
     if np.isnan(fd_arr[0]):
         fd_arr[0] = 0
-    if minimum_unmasked_neighbors > 0:
-        fd_arr_padded = np.pad(fd_arr, pad_width := minimum_unmasked_neighbors)
-        fd_mask = np.full(len(fd_arr_padded), False)
-        for i in range(pad_width, len(fd_arr_padded) - pad_width):
-            if all(fd_arr_padded[range(i - pad_width, i + pad_width + 1)] < fd_threshold):
-                fd_mask[i] = True
-            elif i - pad_width < pad_width and all(fd_arr_padded[range(pad_width, i + pad_width + 1)] < fd_threshold):
-                fd_mask[i] = True
-            elif i + pad_width + 1 > len(fd_arr_padded) - pad_width and all(fd_arr_padded[range(i - pad_width, len(fd_arr_padded) - pad_width)] < fd_threshold):
-                fd_mask[i] = True
-            else:
-                fd_mask[i] = False
-        fd_mask = fd_mask[pad_width:-pad_width]
-    else:
-        fd_mask = fd_arr < fd_threshold
+    if fd_threshold is None:
+        fd_mask = np.full(shape=fd_arr.shape, fill_value=True)
+        fd_threshold="None"
+    else: 
+        if minimum_unmasked_neighbors > 0:
+            fd_arr_padded = np.pad(fd_arr, pad_width := minimum_unmasked_neighbors)
+            fd_mask = np.full(len(fd_arr_padded), False)
+            for i in range(pad_width, len(fd_arr_padded) - pad_width):
+                if all(fd_arr_padded[range(i - pad_width, i + pad_width + 1)] < fd_threshold):
+                    fd_mask[i] = True
+                elif i - pad_width < pad_width and all(fd_arr_padded[range(pad_width, i + pad_width + 1)] < fd_threshold):
+                    fd_mask[i] = True
+                elif i + pad_width + 1 > len(fd_arr_padded) - pad_width and all(fd_arr_padded[range(i - pad_width, len(fd_arr_padded) - pad_width)] < fd_threshold):
+                    fd_mask[i] = True
+                else:
+                    fd_mask[i] = False
+            fd_mask = fd_mask[pad_width:-pad_width]
+        else:
+            fd_mask = fd_arr < fd_threshold
     fd_mask[:start_censoring] = False
 
     if dscans_file:
@@ -271,13 +275,15 @@ def remove_motion_masking(tmask_file: str|list,
     
 
 
-def make_tmask_tsv(tmask_file:str, fd_threshold:float, execute:bool=True):
+def make_tmask_tsv(tmask_file:str, fd_threshold:float|None, execute:bool=True):
     import numpy as np
     import pandas as pd
     from oceanfla.utilities import replace_entities
     
     if not execute:
         return None
+    if fd_threshold is None:
+        fd_threshold = "nan_"
     tmask_data = np.loadtxt(tmask_file)
     tmask_df = pd.DataFrame(columns=[f"{str(fd_threshold)}mm_tmask"], data=tmask_data)
     out_file = replace_entities(
