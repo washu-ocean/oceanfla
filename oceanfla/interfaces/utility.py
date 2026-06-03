@@ -69,7 +69,7 @@ class MergeUnique(IOBase):
 class ExtractDataGroupInputSpec(DynamicTraitedSpec, BaseInterfaceInputSpec):
     task = traits.Str(desc="The task name of the data")
 
-    run = traits.Int(desc="The run number of the data")
+    run = traits.Str(desc="The run number of the data")
 
 
 class ExtractDataGroupOutputSpec(TraitedSpec):
@@ -109,7 +109,7 @@ class ExtractDataGroup(IOBase):
 
 def extract_task_run_file(bids_list: list,
                            task_needed: str,
-                           run_needed: int):
+                           run_needed: str):
     from bids.layout import parse_file_entities
     from pathlib import Path
     

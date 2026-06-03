@@ -6,7 +6,7 @@ from oceanfla.interfaces.reporting import PlotDesign, ReportExclusions
 from oceanfla.interfaces.utility import FLADataSink, ReadMetadataFile
 from oceanfla.interfaces.clean import FilterData, PercentChange
 from oceanfla.interfaces.events import EventsMatrix, ModifyEventsFile, get_number_of_volumes
-from oceanfla.interfaces.exclusions import CheckRunRetention, CheckRuntSNR, MakeRunExclusionTable
+from oceanfla.interfaces.exclusions import CheckExclusionFile, CheckRunRetention, CheckRuntSNR, MakeRunExclusionTable
 from oceanfla.interfaces.nuisance import GenerateNuisanceMatrix
 from oceanfla.interfaces.regression import CombineFIRBetas, ConcatRegressionData, MakeRunDesign, RunGLMRegression
 from oceanfla.interfaces.tmask import FindDscans, MakeTmask, RemoveMotionMasking, make_tmask_tsv
@@ -596,7 +596,7 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
     for task, bold_list in run_map.items():
         for bold_run in bold_list:
             bold_bids = get_bids_file(bold_run)
-            run = int(bold_bids.entities.get("run", 1))
+            run = str(bold_bids.entities["run"]) if "run" in bold_bids.entities else "01"
 
             bold_run_identity_node = Node(
                 IdentityInterface(
@@ -1410,6 +1410,8 @@ def build_exclusion_wf(run, task):
     inputnode = Node(
         IdentityInterface(
             fields=[
+                "subject",
+                "session",
                 "bold_file",
                 "tmask_file"
             ]
@@ -1443,6 +1445,7 @@ def build_exclusion_wf(run, task):
     ### Create frame retention node ###
     frame_retention_check_node = Node(
         CheckRunRetention(
+            minimum_frames=all_opts.min_run_frames,
             retention_threshold=all_opts.run_exclusion_threshold,
             start_censoring=all_opts.start_censoring
         ),
@@ -1480,7 +1483,8 @@ def build_exclusion_wf(run, task):
             ("valid", "valid_x1")
         ]),
         (frame_retention_check_node, validation_merging_node, [
-            ("valid", "valid_x2")
+            ("minimum_frames_valid", "valid_x2"),
+            ("retention_threshold_valid", "valid_x3")
         ]),
         (validation_merging_node, check_validation_node, [
             ("valid", "validation_list")
@@ -1489,7 +1493,8 @@ def build_exclusion_wf(run, task):
             ("include", "include")
         ]),
         (frame_retention_check_node, exclusion_table_node, [
-            ("valid", "frame_retention_valid"),
+            ("minimum_frames_valid", "frame_minimum_valid")
+            ("retention_threshold_valid", "frame_retention_valid"),
             ("retention_percentage", "retention_percentage"),
             ("frames_retained", "frames_retained"),
             ("total_frames", "total_frames")
@@ -1505,6 +1510,28 @@ def build_exclusion_wf(run, task):
             ("exclusion_table", "exclusion_table")
         ])
     ])
+
+    if all_opts.exclusion_file: 
+        check_exclusion_file_node = Node(
+            CheckExclusionFile(
+                task=task,
+                run=run,
+                exclusion_file = all_opts.exclusion_file
+            ),
+            name="check_exclusion_file_node"
+        )
+        workflow.connect([
+            (inputnode, check_exclusion_file_node, [
+                ("subject", "subject"),
+                ("session", "session")
+            ]),
+            (check_exclusion_file_node, validation_merging_node, [
+                ("valid", "valid_x4")
+            ]),
+            (check_exclusion_file_node, exclusion_table_node, [
+                ("valid", "pass_external_exclusion")
+            ])
+        ])
 
     return workflow
 

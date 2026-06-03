@@ -272,7 +272,7 @@ def _build_parser():
     high_motion_params.add_argument("--fd_censoring", "-fc", action="store_true",
                                     help="Flag to indicate that frames above the framewise displacement threshold should be censored before the GLM.")
 
-    config_arguments.add_argument("--min_run_frames", "-mrf", type=int, default=0, 
+    config_arguments.add_argument("--min_run_frames", "-mrf", type=PositiveInt, default=0, 
                                   help="The minimum number of frames a run must have (after any masking if applicable) to be included in the final GLM.")
 
     config_arguments.add_argument("--run_exclusion_threshold", "-re", type=Percent, default=0.0,
