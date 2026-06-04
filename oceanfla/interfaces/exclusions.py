@@ -65,6 +65,7 @@ class CheckRunRetention(SimpleInterface):
             self._results["total_frames"]
         ) = check_run_retention(
             tmask_file=self.inputs.tmask_file,
+            minimum_frames=self.inputs.minimum_frames,
             retention_threshold=self.inputs.retention_threshold,
             start_censoring=self.inputs.start_censoring
         )
@@ -313,6 +314,7 @@ class MakeRunExclusionTable(SimpleInterface):
             run=self.inputs.run,
             task=self.inputs.task, 
             start_censoring=self.inputs.start_censoring,
+            frame_minimum_valid=self.inputs.frame_minimum_valid,
             frame_retention_valid=self.inputs.frame_retention_valid,
             total_frames=self.inputs.total_frames,
             perc_retained=self.inputs.retention_percentage,
@@ -351,7 +353,7 @@ def make_exclusion_table(run: str,
     df.loc[0, "pass frame retention check"] = frame_retention_valid
     df.loc[0, "whole brain tSNR"] = whole_brain_tsnr
     df.loc[0, "pass tSNR check"] = tsnr_valid
-    if pass_external_exclusion:
+    if isinstance(pass_external_exclusion, bool):
         df.loc[0, "pass external exclusion"] = pass_external_exclusion
     df.loc[0, "included"] = included
 

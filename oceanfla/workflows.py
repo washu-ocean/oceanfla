@@ -180,7 +180,7 @@ def build_session_wf(subject, session=None):
     for task, bold_list in space_run_info[all_opts.func_space].items():
         for bold_run in bold_list:
             bold_bids = get_bids_file(bold_run)
-            run = int(bold_bids.entities.get("run", 1))
+            run = str(bold_bids.entities["run"]) if "run" in bold_bids.entities else "01"
 
             bold_run_identity_node = Node(
                 IdentityInterface(
@@ -627,6 +627,10 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
                                                   task=task)
             # Connect the needed files to the exclusion workflow
             workflow.connect([
+                (inputnode, run_exclusion_wf, [
+                    ("subject", "inputnode.subject"),
+                    ("session", "inputnode.session")
+                ]),
                 (bold_run_identity_node, run_exclusion_wf, [
                     ("bold_file", "inputnode.bold_file")
                 ]),
@@ -1493,7 +1497,7 @@ def build_exclusion_wf(run, task):
             ("include", "include")
         ]),
         (frame_retention_check_node, exclusion_table_node, [
-            ("minimum_frames_valid", "frame_minimum_valid")
+            ("minimum_frames_valid", "frame_minimum_valid"),
             ("retention_threshold_valid", "frame_retention_valid"),
             ("retention_percentage", "retention_percentage"),
             ("frames_retained", "frames_retained"),

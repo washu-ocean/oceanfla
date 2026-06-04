@@ -37,17 +37,22 @@ class MergeUnique(IOBase):
         outputs = self._outputs().get()
         # return super()._list_outputs()
         input_keys = [k.split(self._sep) for k in self.inputs.get().keys()]
-        input_key_name_set = set(
-            [t[0] for t in input_keys if len(t) == 2 and t[1].isnumeric()])
-        if len(input_key_name_set) < 1:
+        input_keys = [t for t in input_keys if len(t) == 2 and t[1].isnumeric()]
+        input_key_map = dict()
+        for key, num in input_keys:
+            if key in input_key_map:
+                input_key_map[key].append(num)
+            else:
+                input_key_map[key] = [num]
+        
+        if len(input_key_map) < 1:
             return outputs
-        max_index = max([int(t[1])
-                        for t in input_keys if t[0] in input_key_name_set])
-        for input_key in input_key_name_set:
+
+        for key, num_list in input_key_map.items():
             out = []
-            values = [getattr(self.inputs, f"{input_key}{self._sep}{idx}")
-                      for idx in range(0, max_index + 1)
-                      if hasattr(self.inputs,  f"{input_key}{self._sep}{idx}")]
+            values = [getattr(self.inputs, f"{key}{self._sep}{num}")
+                      for num in sorted(num_list, key=lambda x: int(x))
+                      if hasattr(self.inputs,  f"{key}{self._sep}{num}")]
             if self.inputs.axis == "vstack":
                 for value in values:
                     if isinstance(value, list) and not self.inputs.no_flatten:
@@ -62,7 +67,7 @@ class MergeUnique(IOBase):
 
             if all([o is None for o in out]) and self._collapse_none:
                 out = None
-            outputs[input_key] = out
+            outputs[key] = out
         return outputs
 
 
@@ -120,7 +125,6 @@ def extract_task_run_file(bids_list: list,
         run = int(bids_file_entities.get("run", 1))
         if run == int(run_needed) and bids_file_entities["task"] == task_needed:
             return file
-
     raise RuntimeError(
         f"Could not find a file with entities task-{task_needed}, run-{run_needed}")
 
