@@ -65,12 +65,16 @@ def plot_design_matrix(design_matrix):
         entities={"ext": ".png", "path": None, "suffix":"design-corr"}
     )
 
-    plot_design_matrix(design_df, 
-                       output_file=design_plot_file)
+    dm_plot_ax = plot_design_matrix(design_df)
+    dm_plot_fig = dm_plot_ax.get_figure()
+    dm_plot_fig.savefig(design_plot_file, dpi=300)
+    plt.close()
 
-    plot_design_matrix_correlation(design_df, 
-                                   output_file=design_corr_file, 
-                                   title="Condition Correlations")
+    dm_corr_ax = plot_design_matrix_correlation(design_df,
+                                                title="Condition Correlations")
+    dm_corr_fig = dm_corr_ax.get_figure()
+    dm_corr_fig.savefig(design_corr_file, dpi=300)
+    plt.close()
 
     # fig.savefig(design_plot_file, bbox_inches="tight")
     return design_plot_file, design_corr_file

@@ -1,13 +1,14 @@
 import argparse
 from pathlib import Path
 from textwrap import dedent
+
 from oceanfla.oceanparse import OceanParser
 from oceanfla.utilities import export_args_to_file
 import logging
 import bids
 from datetime import datetime
 
-VERSION = "1.0.3"
+VERSION = "1.0.4"
 
 logger = logging.getLogger("nipype.utils")
 
@@ -37,6 +38,21 @@ def _build_parser():
                 f"path string <{path}> does not represent an existing file"
             )
         return p
+    
+    def ExistingFileType(*suffixes):
+        def existing_type(path):
+            p = ExistingFile(path)
+            has_valid_suffix = False
+            for suffix in suffixes:
+                if p.name.endswith(suffix):
+                    has_valid_suffix = True
+                    break
+            if not has_valid_suffix:
+                raise argparse.ArgumentTypeError(
+                    f"path string <{path}> does not represent an existing file of type <{suffixes}>"
+                )
+            return p
+        return existing_type
 
     def ParentExists(path):
         p = Path(path).resolve()
@@ -145,7 +161,7 @@ def _build_parser():
     config_arguments.add_argument("--task_rename", type=str,
                                   help="The task name to use for the output files. This is typically used if multiple source tasks are modeled together.")
 
-    config_arguments.add_argument("--brain_mask", "-bm", type=ExistingFile,
+    config_arguments.add_argument("--brain_mask", "-bm", type=ExistingFileType(".nii", ".nii.gz"),
                                   help="If the bold file type is volumetric data, a brain mask must also be supplied.")
 
     config_arguments.add_argument("--template_space", "--func_space",
@@ -192,7 +208,7 @@ def _build_parser():
                                   help="""A list of the task regressors to apply this HRF model to. The default is to apply it to all regressors if no 
                                   value is specifed. A list must be specified if both types of models are being used.""")
 
-    config_arguments.add_argument("--custom_hrf", "-ch", type=ExistingFile,
+    config_arguments.add_argument("--custom_hrf", "-ch", type=ExistingFileType(".txt"),
                                   help="The path to a txt file containing the timeseries for a custom hrf to use instead of the double gamma hrf")
 
     config_arguments.add_argument("--unmodeled", "-um", nargs="+",
@@ -256,11 +272,17 @@ def _build_parser():
     high_motion_params.add_argument("--fd_censoring", "-fc", action="store_true",
                                     help="Flag to indicate that frames above the framewise displacement threshold should be censored before the GLM.")
 
+    config_arguments.add_argument("--min_run_frames", "-mrf", type=PositiveInt, default=0, 
+                                  help="The minimum number of frames a run must have (after any masking if applicable) to be included in the final GLM.")
+
     config_arguments.add_argument("--run_exclusion_threshold", "-re", type=Percent, default=0.0,
-                                  help="The percent of frames a run must retain after high motion censoring to be included in the fine GLM.")
+                                  help="The percent of frames a run must retain after high motion censoring to be included in the final GLM.")
 
     config_arguments.add_argument("--min_average_tsnr", type=PositiveFloat, default=0.0,
-                                  help="The minimum whole-brain-average TSNR (across unmasked frames) required for a run to be included in analysis.")
+                                  help="The minimum whole-brain-average TSNR (across unmasked frames) required for a run to be included in the final GLM.")
+    
+    config_arguments.add_argument("--exclusion_file", "-exf", type=ExistingFileType(".csv"), 
+                                  help="A csv table containing the columns of 'sub', 'ses', 'task', and 'run' for runs to exclude from the GLM")
 
     config_arguments.add_argument("--nuisance_regression", "-nr", nargs="*", default=[],
                                   help="""List of variables to include in nuisance regression before the performing the GLM for event-related activation. If no values are specified then
