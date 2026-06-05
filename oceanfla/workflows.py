@@ -20,35 +20,35 @@ from pathlib import Path
 
 logger = get_logger("nipype.workflow")
 
-'''
-Workflow illustration:
 
-oceanfla_wf
-| |
-| \--|
-|    |--taskX_run1_design_wf
-|    ...
-|    |-taskX_runN_design_wf   \
-|                             |
-|--space_MNI152_wf            |
-| |                           |
-| \--|                        |
-|    |--run1_wf  \            v
-|    |--run2_wf   -> regression_wf
-|    ...         /
-|    |--runN_wf /
-|
-|--space_fsLR_wf
-| |
-| \--|
-|    |--run1_wf \
-|    ...         -> regression_wf
-|    |--runN_wf /
+# Workflow illustration:
+
+# oceanfla_wf
+# | |
+# | \--|
+# |    |--taskX_run1_design_wf
+# |    ...
+# |    |-taskX_runN_design_wf   \
+# |                             |
+# |--space_MNI152_wf            |
+# | |                           |
+# | \--|                        |
+# |    |--run1_wf  \            v
+# |    |--run2_wf   -> regression_wf
+# |    ...         /
+# |    |--runN_wf /
+# |
+# |--space_fsLR_wf
+# | |
+# | \--|
+# |    |--run1_wf \
+# |    ...         -> regression_wf
+# |    |--runN_wf /
                          
-One oceanfla workflow with func_space workflows as children, which in part have run-level
-workflows as children that combine outputs to form a single regression workflow for each functional
-space.
-'''
+# One oceanfla workflow with func_space workflows as children, which in part have run-level
+# workflows as children that combine outputs to form a single regression workflow for each functional
+# space.
+
 
 
 def build_oceanfla_wf(subjects: list[str] | str | None, base_dir:Path | str):
