@@ -135,9 +135,9 @@ def extract_task_run_file(bids_list: list,
         bids_file_entities = parse_file_entities(str(parse_path))
         run = int(bids_file_entities.get("run", 1))
         if run == int(run_needed):
-            if bids_file_entities["suffix"] == "events" and bids_file_entities["task"] == event_task_needed:
+            if bids_file_entities.get("suffix", None) == "events" and bids_file_entities["task"] == event_task_needed:
                 return file
-            elif bids_file_entities["suffix"] != "events" and bids_file_entities["task"] == task_needed:
+            elif bids_file_entities.get("suffix", None) != "events" and bids_file_entities["task"] == task_needed:
                 return file
     raise RuntimeError(
         f"Could not find a file with entities task-{task_needed[0]} or task-{task_needed[1]}, run-{run_needed}")
