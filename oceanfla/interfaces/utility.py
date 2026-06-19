@@ -74,7 +74,7 @@ class MergeUnique(IOBase):
 
 class ExtractDataGroupInputSpec(DynamicTraitedSpec, BaseInterfaceInputSpec):
     task = traits.Str(desc="The task name of the data")
-    
+
     event_idx = traits.Int(desc="The index of the event task name")
 
     event_tasks = traits.List(traits.Str, desc="List of task names pertaining to event files")
@@ -103,6 +103,10 @@ class ExtractDataGroup(IOBase):
 
     def _list_outputs(self):
         outputs = self._outputs().get()
+        if self.input.event_tasks and self.inputs.event_idx:
+            event_task_needed = self.input.event_tasks[self.inputs.event_idx]
+        else:
+            event_task_needed = self.inputs.task
         for input_name in self.inputs.get().keys():
             if input_name in ["task", "run", "event_tasks", "event_idx"]:
                 continue
@@ -112,7 +116,7 @@ class ExtractDataGroup(IOBase):
                 outputs[input_name] = extract_task_run_file(
                     bids_list=getattr(self.inputs, input_name),
                     task_needed=self.inputs.task,
-                    event_task_needed=self.inputs.event_tasks[self.inputs.event_idx],
+                    event_task_needed=event_task_needed,
                     run_needed=self.inputs.run
                 )
         return outputs
@@ -120,7 +124,7 @@ class ExtractDataGroup(IOBase):
 
 def extract_task_run_file(bids_list: list,
                           task_needed: str,
-                          event_task_needed: str,
+                          event_task_needed: str | None,
                           run_needed: str):
     from bids.layout import parse_file_entities
     from pathlib import Path
