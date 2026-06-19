@@ -105,10 +105,6 @@ class ExtractDataGroup(IOBase):
 
     def _list_outputs(self):
         outputs = self._outputs().get()
-        if self.inputs.event_tasks:
-            event_task_needed = self.inputs.event_tasks[self.inputs.event_idx]
-        else:
-            event_task_needed = self.inputs.task
         for input_name in self.inputs.get().keys():
             if input_name in ["task", "run", "event_tasks", "event_idx", "either_task_okay"]:
                 continue
@@ -118,7 +114,7 @@ class ExtractDataGroup(IOBase):
                 outputs[input_name] = extract_task_run_file(
                     bids_list=getattr(self.inputs, input_name),
                     task_needed=self.inputs.task,
-                    event_task_needed=event_task_needed,
+                    event_task_needed=self.inputs.event_tasks[self.inputs.event_idx],
                     run_needed=self.inputs.run,
                     either_task_okay=self.inputs.either_task_okay
                 )
