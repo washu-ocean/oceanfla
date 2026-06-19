@@ -195,7 +195,6 @@ def build_session_wf(subject, session=None):
             extract_task_run_source_node = Node(
                 ExtractDataGroup(
                     task=task,
-                    event_task=events_grabber.inputs.task,
                     run=run
                 ),
                 name=f"extract_task_{task}_run_{run}_source_files_node"
@@ -206,6 +205,9 @@ def build_session_wf(subject, session=None):
                     ("subject", "inputnode.subject"),
                     ("session", "inputnode.session"),
                 ]),
+                (inputnode, extract_task_run_source_node, [
+                    ("event_task", "event_task")
+                ])
                 (bold_run_identity_node, ses_design_wf, [
                     ("bold_file", "inputnode.bold_file")
                 ]),
