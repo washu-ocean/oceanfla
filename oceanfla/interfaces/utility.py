@@ -129,7 +129,7 @@ def extract_task_run_file(bids_list: list,
         if run == int(run_needed) and bids_file_entities["task"] in task_needed:
             return file
     raise RuntimeError(
-        f"Could not find a file with entities task-{task_needed}, run-{run_needed}")
+        f"Could not find a file with entities task-{task_needed[0]} or task-{task_needed[1]}, run-{run_needed}")
 
 
 class ReadMetadataFileInputSpec(BaseInterfaceInputSpec):
