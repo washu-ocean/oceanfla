@@ -109,14 +109,16 @@ class ExtractDataGroup(IOBase):
             else:
                 outputs[input_name] = extract_task_run_file(
                     bids_list=getattr(self.inputs, input_name),
-                    task_needed=(self.inputs.task, self.inputs.event_task),
+                    task_needed=self.inputs.task,
+                    event_task_needed=self.inputs.event_task,
                     run_needed=self.inputs.run
                 )
         return outputs
 
 
 def extract_task_run_file(bids_list: list,
-                          task_needed: tuple[str, str],
+                          task_needed: str,
+                          event_task_needed: str,
                           run_needed: str):
     from bids.layout import parse_file_entities
     from pathlib import Path
@@ -126,7 +128,9 @@ def extract_task_run_file(bids_list: list,
         parse_path = Path(fpath.parent.name) / fpath.name
         bids_file_entities = parse_file_entities(str(parse_path))
         run = int(bids_file_entities.get("run", 1))
-        if run == int(run_needed) and bids_file_entities["task"] in task_needed:
+        if run == int(run_needed) and bids_file_entities["suffix"] == "events" and bids_file_entities["task"] == event_task_needed:
+            return file
+        elif run == int(run_needed) and bids_file_entities["task"] == task_needed:
             return file
     raise RuntimeError(
         f"Could not find a file with entities task-{task_needed[0]} or task-{task_needed[1]}, run-{run_needed}")

@@ -207,7 +207,7 @@ def build_session_wf(subject, session=None):
                 ]),
                 (inputnode, extract_task_run_source_node, [
                     ("event_task", "event_task")
-                ])
+                ]),
                 (bold_run_identity_node, ses_design_wf, [
                     ("bold_file", "inputnode.bold_file")
                 ]),
