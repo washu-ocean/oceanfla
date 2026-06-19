@@ -74,8 +74,10 @@ class MergeUnique(IOBase):
 
 class ExtractDataGroupInputSpec(DynamicTraitedSpec, BaseInterfaceInputSpec):
     task = traits.Str(desc="The task name of the data")
+    
+    event_idx = traits.Int(desc="The index of the event task name")
 
-    event_task = traits.Str(desc="(optional) The task name of the event files")
+    event_tasks = traits.List(traits.Str, desc="List of task names pertaining to event files")
 
     run = traits.Str(desc="The run number of the data")
 
@@ -102,7 +104,7 @@ class ExtractDataGroup(IOBase):
     def _list_outputs(self):
         outputs = self._outputs().get()
         for input_name in self.inputs.get().keys():
-            if input_name in ["task", "run", "event_task"]:
+            if input_name in ["task", "run", "event_tasks", "event_idx"]:
                 continue
             if getattr(self.inputs, input_name) is None:
                 outputs[input_name] = None
@@ -110,7 +112,7 @@ class ExtractDataGroup(IOBase):
                 outputs[input_name] = extract_task_run_file(
                     bids_list=getattr(self.inputs, input_name),
                     task_needed=self.inputs.task,
-                    event_task_needed=self.inputs.event_task,
+                    event_task_needed=self.inputs.event_tasks[self.inputs.event_idx],
                     run_needed=self.inputs.run
                 )
         return outputs

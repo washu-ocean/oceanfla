@@ -177,7 +177,7 @@ def build_session_wf(subject, session=None):
         name="merge_design_run_data"
     )
     # for task, bold_list in space_run_info[list(space_run_info.keys())[0]].items():
-    for task, bold_list in space_run_info[all_opts.func_space].items():
+    for idx, (task, bold_list) in enumerate(space_run_info[all_opts.func_space].items()):
         for bold_run in bold_list:
             bold_bids = get_bids_file(bold_run)
             run = str(bold_bids.entities["run"]) if "run" in bold_bids.entities else "01"
@@ -195,6 +195,7 @@ def build_session_wf(subject, session=None):
             extract_task_run_source_node = Node(
                 ExtractDataGroup(
                     task=task,
+                    event_idx=idx,
                     run=run
                 ),
                 name=f"extract_task_{task}_run_{run}_source_files_node"
@@ -206,7 +207,7 @@ def build_session_wf(subject, session=None):
                     ("session", "inputnode.session"),
                 ]),
                 (inputnode, extract_task_run_source_node, [
-                    ("event_task", "event_task")
+                    ("event_task", "event_tasks")
                 ]),
                 (bold_run_identity_node, ses_design_wf, [
                     ("bold_file", "inputnode.bold_file")
