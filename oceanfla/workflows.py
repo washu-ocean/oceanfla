@@ -616,7 +616,8 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
                 ExtractDataGroup(
                     task=task,
                     event_idx=idx,
-                    run=run
+                    run=run,
+                    either_task_okay=True
                 ),
                 name=f"extract_task_{task}_run_{run}_design_files_node"
             )

@@ -81,6 +81,8 @@ class ExtractDataGroupInputSpec(DynamicTraitedSpec, BaseInterfaceInputSpec):
 
     run = traits.Str(desc="The run number of the data")
 
+    either_task_okay = traits.Bool(False, desc="if True, match either the event task name or original task name.")
+
 
 class ExtractDataGroupOutputSpec(TraitedSpec):
     bold_file = traits.File(
@@ -108,7 +110,7 @@ class ExtractDataGroup(IOBase):
         else:
             event_task_needed = self.inputs.task
         for input_name in self.inputs.get().keys():
-            if input_name in ["task", "run", "event_tasks", "event_idx"]:
+            if input_name in ["task", "run", "event_tasks", "event_idx", "either_task_okay"]:
                 continue
             if getattr(self.inputs, input_name) is None:
                 outputs[input_name] = None
@@ -117,7 +119,8 @@ class ExtractDataGroup(IOBase):
                     bids_list=getattr(self.inputs, input_name),
                     task_needed=self.inputs.task,
                     event_task_needed=event_task_needed,
-                    run_needed=self.inputs.run
+                    run_needed=self.inputs.run,
+                    either_task_okay=self.inputs.either_task_okay
                 )
         return outputs
 
@@ -125,7 +128,8 @@ class ExtractDataGroup(IOBase):
 def extract_task_run_file(bids_list: list,
                           task_needed: str,
                           event_task_needed: str | None,
-                          run_needed: str):
+                          run_needed: str,
+                          either_task_okay: bool):
     from bids.layout import parse_file_entities
     from pathlib import Path
 
@@ -134,11 +138,15 @@ def extract_task_run_file(bids_list: list,
         parse_path = Path(fpath.parent.name) / fpath.name
         bids_file_entities = parse_file_entities(str(parse_path))
         run = int(bids_file_entities.get("run", 1))
-        if run == int(run_needed):
-            if bids_file_entities.get("suffix", None) == "events" and bids_file_entities["task"] == event_task_needed:
+        if either_task_okay:
+            if run == int(run_needed) and bids_file_entities["task"] in (task_needed, event_task_needed):
                 return file
-            elif bids_file_entities.get("suffix", None) != "events" and bids_file_entities["task"] == task_needed:
-                return file
+        else:
+            if run == int(run_needed):
+                if bids_file_entities.get("suffix", None) == "events" and bids_file_entities["task"] == event_task_needed:
+                    return file
+                elif bids_file_entities.get("suffix", None) != "events" and bids_file_entities["task"] == task_needed:
+                    return file
     raise RuntimeError(
         f"Could not find a file with entities task-{task_needed[0]} or task-{task_needed[1]}, run-{run_needed}")
 
