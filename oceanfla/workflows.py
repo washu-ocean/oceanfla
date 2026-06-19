@@ -83,8 +83,8 @@ def build_oceanfla_wf(subjects: list[str] | str | None, base_dir:Path | str):
             if ses_wf:
                 fla_wf.connect([
                     (start_node, ses_wf, [
-                        ("task", "inputnode.task")
-                        ("event_task", "inputnode.event_task")
+                        ("task", "inputnode.task"),
+                        ("event_task", "inputnode.event_task"),
                     ])
                 ])
                 nothing_to_do = False
