@@ -75,6 +75,8 @@ class MergeUnique(IOBase):
 class ExtractDataGroupInputSpec(DynamicTraitedSpec, BaseInterfaceInputSpec):
     task = traits.Str(desc="The task name of the data")
 
+    event_task = traits.Str(desc="(optional) The task name of the event files")
+
     run = traits.Str(desc="The run number of the data")
 
 
@@ -100,21 +102,21 @@ class ExtractDataGroup(IOBase):
     def _list_outputs(self):
         outputs = self._outputs().get()
         for input_name in self.inputs.get().keys():
-            if input_name in ["task", "run"]:
+            if input_name in ["task", "run", "event_task"]:
                 continue
             if getattr(self.inputs, input_name) is None:
                 outputs[input_name] = None
             else:
                 outputs[input_name] = extract_task_run_file(
                     bids_list=getattr(self.inputs, input_name),
-                    task_needed=self.inputs.task,
+                    task_needed=(self.inputs.task, self.inputs.event_task),
                     run_needed=self.inputs.run
                 )
         return outputs
 
 
 def extract_task_run_file(bids_list: list,
-                          task_needed: str,
+                          task_needed: tuple[str, str],
                           run_needed: str):
     from bids.layout import parse_file_entities
     from pathlib import Path
@@ -124,7 +126,7 @@ def extract_task_run_file(bids_list: list,
         parse_path = Path(fpath.parent.name) / fpath.name
         bids_file_entities = parse_file_entities(str(parse_path))
         run = int(bids_file_entities.get("run", 1))
-        if run == int(run_needed) and bids_file_entities["task"] == task_needed:
+        if run == int(run_needed) and bids_file_entities["task"] in task_needed:
             return file
     raise RuntimeError(
         f"Could not find a file with entities task-{task_needed}, run-{run_needed}")
