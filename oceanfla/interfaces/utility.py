@@ -104,7 +104,7 @@ class ExtractDataGroup(IOBase):
     def _list_outputs(self):
         outputs = self._outputs().get()
         if self.inputs.event_tasks:
-            event_task_needed = self.input.event_tasks[self.inputs.event_idx]
+            event_task_needed = self.inputs.event_tasks[self.inputs.event_idx]
         else:
             event_task_needed = self.inputs.task
         for input_name in self.inputs.get().keys():
