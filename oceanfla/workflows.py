@@ -44,16 +44,13 @@ logger = get_logger("nipype.workflow")
 # |    |--run1_wf \
 # |    ...         -> regression_wf
 # |    |--runN_wf /
-                         
+
 # One oceanfla workflow with func_space workflows as children, which in part have run-level
 # workflows as children that combine outputs to form a single regression workflow for each functional
 # space.
 
 
-
 def build_oceanfla_wf(subjects: list[str] | str | None, base_dir:Path | str):
-
-    tasks = all_opts.task
     wf_name = f"oceanfla_task_{all_opts.task_rename}_wf"
     fla_wf = Workflow(name=wf_name, base_dir=base_dir)
 
@@ -63,11 +60,12 @@ def build_oceanfla_wf(subjects: list[str] | str | None, base_dir:Path | str):
 
     start_node = Node(
         IdentityInterface(
-            fields=["task"]
+            fields=["task", "event_task"]
         ),
         name="task_start_node"
     )
-    start_node.inputs.task = tasks
+    start_node.inputs.task = all_opts.task
+    start_node.inputs.event_task = all_opts.event_task
 
     nothing_to_do = True
     for sub in subject_list:
@@ -86,10 +84,11 @@ def build_oceanfla_wf(subjects: list[str] | str | None, base_dir:Path | str):
                 fla_wf.connect([
                     (start_node, ses_wf, [
                         ("task", "inputnode.task")
+                        ("event_task", "inputnode.event_task")
                     ])
                 ])
                 nothing_to_do = False
-    
+
     if nothing_to_do:
         logger.warning("NO WORKFLOWS WERE CREATED, EXITING NOW")
         return None
@@ -108,7 +107,8 @@ def build_session_wf(subject, session=None):
             fields=[
                 "subject",
                 "session",
-                "task"
+                "task",
+                "event_task"
             ]
         ),
         name="inputnode"
@@ -120,11 +120,11 @@ def build_session_wf(subject, session=None):
                                               subject=subject,
                                               session=session,
                                               tasks=all_opts.task)
-    
+
     if all_opts.func_space not in space_run_info:
         logger.warning(f"NO BOLD RUNS FOUND FOR SUBJECT:{subject}, SESSION:{session}, TEMPLATE_SPACE:{all_opts.func_space}")
         return None
-    
+
     confounds_grabber = Node(
         BIDSDataGrabber(
             base_dir=all_opts.preproc_bids,
@@ -168,10 +168,10 @@ def build_session_wf(subject, session=None):
         (inputnode, events_grabber, [
             ("subject", "subject"),
             ("session", "session"),
-            ("task", "task")
+            ("event_task", "task")
         ])
     ])
-    
+
     design_merging_node = Node(
         MergeUnique(),
         name="merge_design_run_data"
@@ -192,7 +192,7 @@ def build_session_wf(subject, session=None):
 
             ses_design_wf = build_ses_design_wf(run, task)
 
-            extract_task_run_souce_node = Node(
+            extract_task_run_source_node = Node(
                 ExtractDataGroup(
                     task=task,
                     run=run
@@ -208,17 +208,17 @@ def build_session_wf(subject, session=None):
                 (bold_run_identity_node, ses_design_wf, [
                     ("bold_file", "inputnode.bold_file")
                 ]),
-                (confounds_grabber, extract_task_run_souce_node, [
+                (confounds_grabber, extract_task_run_source_node, [
                     ("confounds", "confounds")
                 ]),
-                (events_grabber, extract_task_run_souce_node, [
+                (events_grabber, extract_task_run_source_node, [
                     ("events", "events"),
                 ]),
-                (extract_task_run_souce_node, ses_design_wf, [
+                (extract_task_run_source_node, ses_design_wf, [
                     ("confounds", "inputnode.confounds_file"),
                     ("events", "inputnode.events_file"),
                 ]),
-                (extract_task_run_souce_node, design_merging_node, [
+                (extract_task_run_source_node, design_merging_node, [
                     ("confounds", f"confounds_x{run}")
                 ])
             ])
@@ -227,7 +227,6 @@ def build_session_wf(subject, session=None):
             for out_key in ses_design_wf.get_node("outputnode").outputs.get().keys():
                 workflow.connect(ses_design_wf, f"outputnode.{out_key}",
                                  design_merging_node, f"{out_key}_x{run}")
-
 
     #### only doing one functional space at a time ######
     # for func_space, space_dict in space_run_info.items():
@@ -241,7 +240,7 @@ def build_session_wf(subject, session=None):
         (inputnode, func_space_wf, [
             ("subject", "inputnode.subject"),
             ("session", "inputnode.session"),
-        ]), 
+        ]),
         (design_merging_node, func_space_wf, [
             ("main_design", "inputnode.main_design_files"),
             ("nuisance_design", "inputnode.nuisance_design_files"),
@@ -300,8 +299,8 @@ def build_ses_design_wf(run, task):
         (tmask_node, outputnode, [
             ("tmask_file", "tmask_file"),
         ])
-    ]) 
-    
+    ])
+
     ### Find Dummy scans if supplied ###
     if all_opts.dscans_path:
         find_dscans_node = Node(
@@ -416,9 +415,9 @@ def build_ses_design_wf(run, task):
     ### created the needed design files ###
     nuisance_regressors = None
     if all_opts.nuisance_regression:
-        nuisance_regressors = [rc if rc not in all_opts.generic_nuisance_columns 
-                              else make_regressor_run_specific(rc, run=run, task=task) 
-                              for rc in all_opts.nuisance_regression]
+        nuisance_regressors = [rc if rc not in all_opts.generic_nuisance_columns
+                               else make_regressor_run_specific(rc, run=run, task=task)
+                               for rc in all_opts.nuisance_regression]
         if ("mean" not in all_opts.nuisance_regression) and (not all_opts.exclude_run_mean):
             nuisance_regressors.append(make_regressor_run_specific("mean", run=run, task=task))
 
@@ -509,7 +508,7 @@ def build_ses_design_wf(run, task):
                     ("nuisance_design", "in_file")
                 ])
             ])
-    
+
     return workflow
 
 
@@ -639,7 +638,6 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
                 ])
             ])
 
-
             run_level_wf = build_run_workflow(run=run,
                                               task=task,
                                               file_extension=file_extension)
@@ -705,7 +703,6 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
             ("include", "inputnode.inclusion_list")
         ])
     ])
-
 
     ### Datasink for user outputs ###
     bold_runs_list = [bf for bold_list in run_map.values() for bf in bold_list]
@@ -1025,7 +1022,6 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
         ])
     ])
 
-
     return workflow
 
 
@@ -1149,8 +1145,8 @@ def build_run_workflow(run, task: str, file_extension: str):
     if all_opts.nuisance_regression:
 
         regression_wf = build_regression_workflow(
-            task=task, 
-            run=run, 
+            task=task,
+            run=run,
             need_intercept=all_opts.exclude_run_mean
         )
 
@@ -1431,7 +1427,7 @@ def build_exclusion_wf(run, task):
         ),
         name="outputnode"
     )
-    
+
     validation_merging_node = Node(
         MergeUnique(),
         name="merge_validations_node"
@@ -1515,12 +1511,12 @@ def build_exclusion_wf(run, task):
         ])
     ])
 
-    if all_opts.exclusion_file: 
+    if all_opts.exclusion_file:
         check_exclusion_file_node = Node(
             CheckExclusionFile(
                 task=task,
                 run=run,
-                exclusion_file = all_opts.exclusion_file
+                exclusion_file=all_opts.exclusion_file
             ),
             name="check_exclusion_file_node"
         )
@@ -1619,7 +1615,7 @@ def build_smoothing_wf(run, task: str, file_extension: str):
 
 
 def build_reporting_workflow(task:str):
-    
+
     workflow = Workflow(name=f"task_{task}_reporting_wf")
 
     inputnode = Node(
@@ -1676,12 +1672,10 @@ def build_reporting_workflow(task:str):
             ("confounds_files", "confounds_files"),
             ("inclusion_list", "inclusion_list"),
             ("ses_tmask_file", "ses_tmask_file")
-        ]), 
+        ]),
         (report_exclusions_node, outputnode, [
             ("exclusion_report", "exclusion_report")
         ])
     ])
 
     return workflow
-
-    

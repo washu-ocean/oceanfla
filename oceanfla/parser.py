@@ -12,6 +12,7 @@ VERSION = "1.0.4"
 
 logger = logging.getLogger("nipype.utils")
 
+
 def _build_parser():
 
     # Build out some useful argument types
@@ -38,7 +39,7 @@ def _build_parser():
                 f"path string <{path}> does not represent an existing file"
             )
         return p
-    
+
     def ExistingFileType(*suffixes):
         def existing_type(path):
             p = ExistingFile(path)
@@ -137,7 +138,7 @@ def _build_parser():
                                    help="The session ID")
 
     # session_arguments.add_argument("--events_long", "-el", type=ExistingDir, nargs="?", const=lambda a: a.derivs_dir / a.preproc_subfolder,
-    #                                help="""Path to the directory containing long formatted event files to use. 
+    #                                help="""Path to the directory containing long formatted event files to use.
     #                                Default is the derivatives directory containing preprocessed outputs.""")
 
     session_arguments.add_argument("--export_args", "-ea", type=ParentExists,
@@ -148,7 +149,7 @@ def _build_parser():
 
     session_arguments.add_argument("--keep_work", action="store_true",
                                    help="Use this flag to prevent the working directory for this run from being deleted")
-    
+
     session_arguments.add_argument("--debug", action="store_true",
                                    help="Use this flag to recieve DEBUG level logging AND keep the working directory from being deleted")
 
@@ -157,7 +158,9 @@ def _build_parser():
 
     config_arguments.add_argument("--task", "-t", nargs="+", required=True,
                                   help="The name of the task(s) to analyze.")
-    
+    config_arguments.add_argument("--event_task", nargs="+",
+                                  help="Task name(s) used to query event files. If not specified, will be the same as '--task'. "
+                                  "If specified, must be either one name or the same number of names as specified in `--task`.")
     config_arguments.add_argument("--task_rename", type=str,
                                   help="The task name to use for the output files. This is typically used if multiple source tasks are modeled together.")
 
@@ -189,7 +192,7 @@ def _build_parser():
 
     config_arguments.add_argument("--work_dir", "-w", type=ExistingDir, required=True,
                                   help="Path to a working directory to store intermediate outputs")
-    
+
     config_arguments.add_argument("--save_intermediates", "-si", action="store_true",
                                   help="Flag to indicate that intermediate files, created during processing, should be saved to the output directory.")
 
@@ -214,7 +217,7 @@ def _build_parser():
     config_arguments.add_argument("--unmodeled", "-um", nargs="+",
                                   help="""A list of the task regressors to leave unmodeled, but still included in the final design matrix. These are 
                                   typically continuous variables that need not be modeled with hrf or fir, but any of the task regressors can be included.""")
-    
+
     config_arguments.add_argument("--parametric_modulators", "-pm", nargs="+",
                                   help="""A list of the task parameters to include as parametric modulators in the final design matrix. This typically includes 
                                   task performance and/or environment variables. These parameters must be included in the events file as separate columns.""")
@@ -229,7 +232,7 @@ def _build_parser():
 
     config_arguments.add_argument("--start_censoring", "-sc", type=PositiveInt, default=0,
                                   help="The number of frames to censor out at the beginning of each run. Typically used to censor scanner equilibrium time. Default is 0")
-    
+
     config_arguments.add_argument("--dscans_path", type=ExistingDir,
                                   help="""The path to the directory containing 'dscans' files for inserting dummy scans into bold runs. Files must be named exactly as corresponding bold image except with 'dscans' as 
                                   the suffix and '.tsv' as the extension. Contents of the file must be a column, titled 'dummy_scan', with ones and zeros. Ones denote which frames should be dummy scans.""")
@@ -250,7 +253,7 @@ def _build_parser():
                                   help="Repetition time of the function runs in seconds. If it is not supplied, an attempt will be made to read it from the JSON sidecar file.")
 
     # config_arguments.add_argument("--detrend_data", "-dd", action="store_true",
-    #                               help="""Flag to demean and detrend the data before modeling. The default is to include 
+    #                               help="""Flag to demean and detrend the data before modeling. The default is to include
     #                               a mean and trend line into the nuisance matrix instead.""")
 
     config_arguments.add_argument("--percent_change", "-pc", action="store_true",
@@ -272,7 +275,7 @@ def _build_parser():
     high_motion_params.add_argument("--fd_censoring", "-fc", action="store_true",
                                     help="Flag to indicate that frames above the framewise displacement threshold should be censored before the GLM.")
 
-    config_arguments.add_argument("--min_run_frames", "-mrf", type=PositiveInt, default=0, 
+    config_arguments.add_argument("--min_run_frames", "-mrf", type=PositiveInt, default=0,
                                   help="The minimum number of frames a run must have (after any masking if applicable) to be included in the final GLM.")
 
     config_arguments.add_argument("--run_exclusion_threshold", "-re", type=Percent, default=0.0,
@@ -280,8 +283,8 @@ def _build_parser():
 
     config_arguments.add_argument("--min_average_tsnr", type=PositiveFloat, default=0.0,
                                   help="The minimum whole-brain-average TSNR (across unmasked frames) required for a run to be included in the final GLM.")
-    
-    config_arguments.add_argument("--exclusion_file", "-exf", type=ExistingFileType(".csv"), 
+
+    config_arguments.add_argument("--exclusion_file", "-exf", type=ExistingFileType(".csv"),
                                   help="A csv table containing the columns of 'sub', 'ses', 'task', and 'run' for runs to exclude from the GLM")
 
     config_arguments.add_argument("--nuisance_regression", "-nr", nargs="*", default=[],
@@ -372,9 +375,17 @@ def parse_args():
                 parser.error(
                     "Each use of the '--group' argument must have a least 3 values")
 
+    if not args.event_task:
+        args.event_task = args.task
+    elif len(args.event_task) == 1:
+        args.event_task *= len(args.task)
+    elif len(args.event_task) != len(args.task):
+        parser.error("--event_task must either contain 1 task name, or the same number "
+                     "of task names as --task.")
+
     # Create label for this execution attempt
     if not args.task_rename:
-        args.task_rename = "-".join(sorted(args.task))
+        args.task_rename = "-".join(sorted(args.event_task))
     tstamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     execution_label = f"oceanfla_task-{args.task_rename}_{tstamp}"
 
@@ -436,14 +447,13 @@ def parse_args():
             args.log_dir = args.datasink_path / f"sub-{args.subject[0]}" / "logs"
             args.log_file = args.log_dir / f"sub-{args.subject[0]}_{ses_label}{execution_label}.log"
     args.log_dir.mkdir(exist_ok=True, parents=True)
-    
+
     args.log_level = logging.INFO
     if args.debug:
         args.log_level = logging.DEBUG
         args.keep_work = True
         args.save_intermediates = True
 
-    
     # Make the options global
     from oceanfla.config import set_configs
     set_configs(args.__dict__)
@@ -459,4 +469,3 @@ def parse_args():
         from oceanfla.utilities import clean_paths
         logger.info("Removing previous outputs")
         clean_paths(sorted(old_outputs))
-
