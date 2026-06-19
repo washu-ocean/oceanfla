@@ -244,6 +244,7 @@ def build_session_wf(subject, session=None):
         (inputnode, func_space_wf, [
             ("subject", "inputnode.subject"),
             ("session", "inputnode.session"),
+            ("event_task", "inputnode.event_task"),
         ]),
         (design_merging_node, func_space_wf, [
             ("main_design", "inputnode.main_design_files"),
@@ -528,6 +529,7 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
             fields=[
                 "subject",
                 "session",
+                "event_task",
                 "main_design_files",
                 "tmask_files",
                 "nuisance_design_files",
@@ -596,7 +598,7 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
     )
     # Create a run-level workflow for each run that has this functional space
     input_num = 1
-    for task, bold_list in run_map.items():
+    for idx, (task, bold_list) in enumerate(run_map.items()):
         for bold_run in bold_list:
             bold_bids = get_bids_file(bold_run)
             run = str(bold_bids.entities["run"]) if "run" in bold_bids.entities else "01"
@@ -613,6 +615,7 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
             extract_task_run_design_node = Node(
                 ExtractDataGroup(
                     task=task,
+                    event_idx=idx,
                     run=run
                 ),
                 name=f"extract_task_{task}_run_{run}_design_files_node"
@@ -620,6 +623,7 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
             workflow.connect([
                 (inputnode, extract_task_run_design_node, [
                     ("main_design_files", "main_design"),
+                    ("event_task", "event_tasks"),
                     ("nuisance_design_files", "nuisance_design"),
                     ("tmask_files", "tmask_file"),
                     ("confounds_files", "confounds")
