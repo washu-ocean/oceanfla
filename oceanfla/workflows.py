@@ -189,16 +189,22 @@ def build_session_wf(subject, session=None):
                 name=f"{task}_run_{run}_bold_identity_node"
             )
             bold_run_identity_node.inputs.bold_file = bold_run
-
             ses_design_wf = build_ses_design_wf(run, task)
 
             extract_task_run_source_node = Node(
                 ExtractDataGroup(
                     task=task,
-                    event_idx=idx,
                     run=run
                 ),
                 name=f"extract_task_{task}_run_{run}_source_files_node"
+            )
+
+            extract_event_task_run_source_node = Node(
+                ExtractDataGroup(
+                    task=all_opts.bold_task_to_event_task[task],
+                    run=run
+                ),
+                name=f"extract_event_task_{task}_run_{run}_source_files_node"
             )
 
             workflow.connect([
@@ -206,20 +212,19 @@ def build_session_wf(subject, session=None):
                     ("subject", "inputnode.subject"),
                     ("session", "inputnode.session"),
                 ]),
-                (inputnode, extract_task_run_source_node, [
-                    ("event_task", "event_tasks")
-                ]),
                 (bold_run_identity_node, ses_design_wf, [
                     ("bold_file", "inputnode.bold_file")
                 ]),
                 (confounds_grabber, extract_task_run_source_node, [
                     ("confounds", "confounds")
                 ]),
-                (events_grabber, extract_task_run_source_node, [
+                (events_grabber, extract_event_task_run_source_node, [
                     ("events", "events"),
                 ]),
                 (extract_task_run_source_node, ses_design_wf, [
                     ("confounds", "inputnode.confounds_file"),
+                ]),
+                (extract_event_task_run_source_node, ses_design_wf, [
                     ("events", "inputnode.events_file"),
                 ]),
                 (extract_task_run_source_node, design_merging_node, [
@@ -244,7 +249,6 @@ def build_session_wf(subject, session=None):
         (inputnode, func_space_wf, [
             ("subject", "inputnode.subject"),
             ("session", "inputnode.session"),
-            ("event_task", "inputnode.event_task"),
         ]),
         (design_merging_node, func_space_wf, [
             ("main_design", "inputnode.main_design_files"),
@@ -529,7 +533,6 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
             fields=[
                 "subject",
                 "session",
-                "event_task",
                 "main_design_files",
                 "tmask_files",
                 "nuisance_design_files",
@@ -615,19 +618,25 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
             extract_task_run_design_node = Node(
                 ExtractDataGroup(
                     task=task,
-                    event_idx=idx,
                     run=run,
-                    either_task_okay=True
                 ),
                 name=f"extract_task_{task}_run_{run}_design_files_node"
             )
+            extract_event_task_run_design_node = Node(
+                ExtractDataGroup(
+                    task=all_opts.bold_task_to_event_task[task],
+                    run=run
+                ),
+                name=f"extract_event_task_{task}_run_{run}_design_files_node"
+            )
             workflow.connect([
                 (inputnode, extract_task_run_design_node, [
-                    ("main_design_files", "main_design"),
-                    ("event_task", "event_tasks"),
                     ("nuisance_design_files", "nuisance_design"),
                     ("tmask_files", "tmask_file"),
                     ("confounds_files", "confounds")
+                ]),
+                (inputnode, extract_event_task_run_design_node, [
+                    ("main_design_files", "main_design"),
                 ])
             ])
 
@@ -664,7 +673,7 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
                     ("bold_file", "inputnode.bold_file")
                 ]),
                 (run_exclusion_wf, run_level_wf, [
-                    ("outputnode.include", f"inputnode.include")
+                    ("outputnode.include", "inputnode.include")
                 ])
             ])
 
@@ -685,8 +694,10 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
                 ]),
                 (extract_task_run_design_node, input_merging_node, [
                     ("tmask_file", f"tmask_file_x{input_num}"),
-                    ("main_design", f"design_matrix_x{input_num}"),
                     ("confounds", f"confounds_x{input_num}")
+                ]),
+                (extract_event_task_run_design_node, input_merging_node, [
+                    ("main_design", f"design_matrix_x{input_num}"),
                 ]),
                 (run_exclusion_wf, input_merging_node, [
                     ("outputnode.include", f"include_x{input_num}"),

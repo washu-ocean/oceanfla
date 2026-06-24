@@ -377,8 +377,6 @@ def parse_args():
 
     if not args.event_task:
         args.event_task = args.task
-    elif len(args.event_task) == 1:
-        args.event_task *= len(args.task)
     elif len(args.event_task) != len(args.task):
         parser.error("--event_task must either contain 1 task name, or the same number "
                      "of task names as --task.")
@@ -425,13 +423,13 @@ def parse_args():
         parser.error(
             f"The preprocessed outputs directory does not exist at path: {args.preproc_bids}")
 
-    raw_bids_db_path = args.work / f".raw_indexer"
+    raw_bids_db_path = args.work / ".raw_indexer"
     args.raw_layout = bids.BIDSLayout(root=args.raw_bids,
                                       database_path=raw_bids_db_path,
                                       #   reset_database=True,
                                       validate=False,
                                       indexer=bids.BIDSLayoutIndexer(index_metadata=False))
-    preproc_bids_db_path = args.work / f".preproc_indexer"
+    preproc_bids_db_path = args.work / ".preproc_indexer"
     args.preproc_layout = bids.BIDSLayout(root=args.preproc_bids,
                                           database_path=preproc_bids_db_path,
                                           #   reset_database=True,

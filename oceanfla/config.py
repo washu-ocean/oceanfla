@@ -3,8 +3,8 @@ import bids
 import json
 import multiprocessing
 import logging
+from pprint import pformat
 from logging.handlers import QueueHandler
-
 
 class Options():
     '''
@@ -27,19 +27,20 @@ class Options():
     def __init__(self, opts=None):
         if not self._initialized and opts:
             # set up the global options
-            option_msg_list = ["User Inputs:", "-"*30]
+            option_msg_list = ["User Inputs:", "-" * 30]
 
             for k, v in opts.items():
                 # find the layouts
                 if isinstance(v, bids.BIDSLayout):
                     self.layouts.append(v)
+                    print(f"appended layout {v}")
                 # check for variable regroupings
                 elif k == "group" and v:
                     option_msg_list.append(f" {k} : {v}")
                     gmap = dict()
                     for regroup in v:
                         group_rename = regroup[-1]
-                        for i in range(len(regroup)-1):
+                        for i in range(len(regroup) - 1):
                             gmap[regroup[i]] = group_rename
                     setattr(self, k, gmap)
                     continue
@@ -48,7 +49,9 @@ class Options():
                 # add the option to the class attributes
                 setattr(self, k, v)
 
-            option_msg_list.append("-"*30)
+            setattr(self, "bold_task_to_event_task", {task: event_task for task, event_task in zip(self.task, self.event_task)})
+
+            option_msg_list.append("-" * 30)
 
             # start the logging subprocess
             log_process, log_queue = config_logging_process(self.log_file, self.log_level, self.log_format)
@@ -57,16 +60,17 @@ class Options():
             for log_name in self.logger_names:
                 logger = get_logger(log_name, log_queue)
                 logger.setLevel(self.log_level)
-            
+
             # log the arguments used for this run
             logger = get_logger("nipype.utils")
             logger.info("\n\t".join(option_msg_list))
 
             self._initialized = True
             self.bids_patterns = json.loads(self._pattern_file.read_text())["oceanfla_patterns"]
-    
+
 
 all_opts = Options()
+
 
 def set_configs(args):
     all_opts.__init__(args)
@@ -81,14 +85,15 @@ def get_layout_for_file(file) -> bids.BIDSLayout:
     ----------
     file: str
         The path of the file belonging to some BIDSLayout / BIDS directory
-    
+
 
     Returns
     -------
     bids.BIDSLayout
         The BIDSLayout object if the file belongs to a parsed BIDS directory
-    
+
     '''
+    # logger = get_logger("nipype.workflow")
     if isinstance(file, Path):
         file = str(file.resolve())
     if isinstance(file, str):
@@ -97,11 +102,13 @@ def get_layout_for_file(file) -> bids.BIDSLayout:
         raise ValueError(
             f"argument must be of type Path or str, not {type(file)}")
 
+    print(f"{file=}")
+    print(f"{all_opts.layouts=}")
+
     for lay in all_opts.layouts:
         if file.startswith(str(lay._root.resolve())):
             return lay
-    raise RuntimeError(f"No layout correspond to the input file {file}")
-
+    raise RuntimeError(f"No layout correspond to the input file {file}. Layouts: {pformat(all_opts.layouts)}")
 
 
 def get_bids_file(file):
@@ -113,13 +120,13 @@ def get_bids_file(file):
     ----------
     file: str
         The path of the file to convert
-    
+
 
     Returns
     -------
     bids.layout.BIDSFile
         The BIDSFile object or None if it is not found
-    
+
     '''
     if isinstance(file, bids.layout.BIDSFile):
         return file
@@ -162,7 +169,7 @@ def file_log_process(q, log_file, log_level=logging.INFO, log_fmt=None):
             break
     root.info("closing log file")
     file_handler.close()
-    
+
 
 def config_logging_process(log_file, log_level=logging.INFO, log_fmt=None):
     log_q = multiprocessing.Queue(-1)
@@ -177,7 +184,7 @@ def config_logging_process(log_file, log_level=logging.INFO, log_fmt=None):
 
 
 def finish_logging():
-    try: 
+    try:
         logger = get_logger('nipype.utils')
         logger.info("Ending log")
     except:
@@ -193,9 +200,9 @@ def finish_logging():
 def get_logger(name, q=None):
     if q is None:
         q = all_opts.log_queue
-    
+
     logger = logging.getLogger(name)
-    has_queue_hdlr = any([isinstance(hdlr, QueueHandler) 
+    has_queue_hdlr = any([isinstance(hdlr, QueueHandler)
                           for hdlr in logger.handlers])
     if not has_queue_hdlr:
         queue_handler = QueueHandler(q)
@@ -208,5 +215,3 @@ def close_layouts():
     for lay in all_opts.layouts:
         lay.connection_manager.session.close()
     del all_opts.layouts[:]
-
-

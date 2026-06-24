@@ -74,14 +74,7 @@ class MergeUnique(IOBase):
 
 class ExtractDataGroupInputSpec(DynamicTraitedSpec, BaseInterfaceInputSpec):
     task = traits.Str(desc="The task name of the data")
-
-    event_idx = traits.Int(desc="The index of the event task name")
-
-    event_tasks = traits.List(traits.Str, desc="List of task names pertaining to event files")
-
     run = traits.Str(desc="The run number of the data")
-
-    either_task_okay = traits.Bool(False, desc="if True, match either the event task name or original task name.")
 
 
 class ExtractDataGroupOutputSpec(TraitedSpec):
@@ -106,7 +99,7 @@ class ExtractDataGroup(IOBase):
     def _list_outputs(self):
         outputs = self._outputs().get()
         for input_name in self.inputs.get().keys():
-            if input_name in ["task", "run", "event_tasks", "event_idx", "either_task_okay"]:
+            if input_name in ["task", "run"]:
                 continue
             if getattr(self.inputs, input_name) is None:
                 outputs[input_name] = None
@@ -114,18 +107,14 @@ class ExtractDataGroup(IOBase):
                 outputs[input_name] = extract_task_run_file(
                     bids_list=getattr(self.inputs, input_name),
                     task_needed=self.inputs.task,
-                    event_task_needed=self.inputs.event_tasks[self.inputs.event_idx],
-                    run_needed=self.inputs.run,
-                    either_task_okay=self.inputs.either_task_okay
+                    run_needed=self.inputs.run
                 )
         return outputs
 
 
 def extract_task_run_file(bids_list: list,
                           task_needed: str,
-                          event_task_needed: str | None,
-                          run_needed: str,
-                          either_task_okay: bool):
+                          run_needed: str):
     from bids.layout import parse_file_entities
     from pathlib import Path
 
@@ -134,17 +123,10 @@ def extract_task_run_file(bids_list: list,
         parse_path = Path(fpath.parent.name) / fpath.name
         bids_file_entities = parse_file_entities(str(parse_path))
         run = int(bids_file_entities.get("run", 1))
-        if either_task_okay:
-            if run == int(run_needed) and bids_file_entities["task"] in (task_needed, event_task_needed):
-                return file
-        else:
-            if run == int(run_needed):
-                if bids_file_entities.get("suffix", None) == "events" and bids_file_entities["task"] == event_task_needed:
-                    return file
-                elif bids_file_entities.get("suffix", None) != "events" and bids_file_entities["task"] == task_needed:
-                    return file
+        if run == int(run_needed) and bids_file_entities["task"] == task_needed:
+            return file
     raise RuntimeError(
-        f"Could not find a file with entities task-{task_needed} or task-{event_task_needed}, run-{run_needed}")
+        f"Could not find a file with entities task-{task_needed}, run-{run_needed}")
 
 
 class ReadMetadataFileInputSpec(BaseInterfaceInputSpec):
