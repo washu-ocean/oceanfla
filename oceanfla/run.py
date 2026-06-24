@@ -19,7 +19,7 @@ def main():
                 'crashdump_dir': all_opts.log_dir
             }
         }
-    )   
+    )
 
     # Build and run the main workflow
     oceanfla_wf = build_oceanfla_wf(
@@ -31,7 +31,7 @@ def main():
     if oceanfla_wf:
         logger.info("starting oceanfla!")
         oceanfla_wf.run(plugin="MultiProc", plugin_args=plugin_args_dict)
-        
+
     logger.info("oceanfla is finished!")
 
     # Some clean-up
@@ -41,4 +41,3 @@ def main():
             all_opts.work
         ])
     finish_logging()
-    

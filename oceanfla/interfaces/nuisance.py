@@ -122,7 +122,7 @@ def make_regressor_run_specific(regressor_name:str, bids_source_file:str|Path=No
     if (run is None) or (task is None):
         if bids_source_file is None: 
             raise RuntimeError("'run' and 'task' parameters must be provided if 'bids_source_file' is not provided.")
-        from ..config import get_bids_file
+        from oceanfla.config import get_bids_file
         bidsfile = get_bids_file(bids_source_file)
         run = int(bidsfile.entities.get("run", 1))
         task = bidsfile.entities["task"]

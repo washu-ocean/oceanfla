@@ -23,6 +23,7 @@ def optional_trait(*in_traits, **kwargs):
         **kwargs
     )
 
+
 class MergeUnique(IOBase):
     input_spec = MergeInputSpec
     output_spec = DynamicTraitedSpec
@@ -44,7 +45,7 @@ class MergeUnique(IOBase):
                 input_key_map[key].append(num)
             else:
                 input_key_map[key] = [num]
-        
+
         if len(input_key_map) < 1:
             return outputs
 
@@ -52,7 +53,7 @@ class MergeUnique(IOBase):
             out = []
             values = [getattr(self.inputs, f"{key}{self._sep}{num}")
                       for num in sorted(num_list, key=lambda x: int(x))
-                      if hasattr(self.inputs,  f"{key}{self._sep}{num}")]
+                      if hasattr(self.inputs, f"{key}{self._sep}{num}")]
             if self.inputs.axis == "vstack":
                 for value in values:
                     if isinstance(value, list) and not self.inputs.no_flatten:
@@ -73,7 +74,6 @@ class MergeUnique(IOBase):
 
 class ExtractDataGroupInputSpec(DynamicTraitedSpec, BaseInterfaceInputSpec):
     task = traits.Str(desc="The task name of the data")
-
     run = traits.Str(desc="The run number of the data")
 
 
@@ -91,7 +91,7 @@ class ExtractDataGroupOutputSpec(TraitedSpec):
         desc="The described events file"
     )
 
-    
+
 class ExtractDataGroup(IOBase):
     input_spec = ExtractDataGroupInputSpec
     output_spec = DynamicTraitedSpec
@@ -113,11 +113,11 @@ class ExtractDataGroup(IOBase):
 
 
 def extract_task_run_file(bids_list: list,
-                           task_needed: str,
-                           run_needed: str):
+                          task_needed: str,
+                          run_needed: str):
     from bids.layout import parse_file_entities
     from pathlib import Path
-    
+
     for file in bids_list:
         fpath = Path(file)
         parse_path = Path(fpath.parent.name) / fpath.name
@@ -169,7 +169,7 @@ class ReadMetadataFile(SimpleInterface):
         self._results.update(metadata_results)
 
         return runtime
-        
+
 
 def read_metadata_file(data_file: str,
                        requested_fields: list[str],
@@ -185,7 +185,7 @@ def read_metadata_file(data_file: str,
     if metadata_path.exists():
         with open(metadata_path, "r") as metaf:
             metadata_dict = json.load(metaf)
-        
+
         for fname in requested_fields:
             if strict and fname not in metadata_dict:
                 raise KeyError(
@@ -199,7 +199,7 @@ def read_metadata_file(data_file: str,
 
 class OptionalInterfaceSpec(DynamicTraitedSpec):
     execute = traits.Bool(default_value=True, usedefault=True)
-    
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         inital_trait_values = self.trait_get()
@@ -216,7 +216,7 @@ class OptionalInterfaceSpec(DynamicTraitedSpec):
                     # default_value=None,
                     usedefualt=current_trait.usedefault
                 )
-                # [current_trait, None], 
+                # [current_trait, None],
             )
             # trait_set_value = inital_trait_values[trait_name] if inital_trait_values[trait_name] else traits.Undefined
             # if current_trait.usedefault:
@@ -224,7 +224,6 @@ class OptionalInterfaceSpec(DynamicTraitedSpec):
             # if trait_name == "execute":
             #     trait_set_value = True
             self.trait_set(**{trait_name: inital_trait_values[trait_name]})
-        
 
 
 class OptionalInterface(SimpleInterface):
@@ -282,7 +281,7 @@ class OptionalInterface(SimpleInterface):
             return results
         else:
             return super().run(cwd=cwd, ignore_exception=ignore_exception, **inputs)
-        
+
 
 class OptionalCommandLineInterface(CommandLine):
     def run(self, cwd=None, ignore_exception=None, **inputs):
@@ -339,11 +338,11 @@ class OptionalCommandLineInterface(CommandLine):
             return results
         else:
             return super().run(cwd=cwd, ignore_exception=ignore_exception, **inputs)
-        
+
 
 class FLADataSinkInputSpec(_DerivativesDataSinkInputSpec, OptionalInterfaceSpec):
     in_file = traits.Union(
-        traits.File(exists=True), 
+        traits.File(exists=True),
         traits.List(),
         None,
         desc="the object to be saved"
@@ -352,6 +351,7 @@ class FLADataSinkInputSpec(_DerivativesDataSinkInputSpec, OptionalInterfaceSpec)
 
 class FLADataSink(DerivativesDataSink, OptionalInterface):
     input_spec = FLADataSinkInputSpec
+
     def __init__(self, allowed_entities=None, out_path_base=None, extra_bids_patterns=None, **inputs):
         super().__init__(allowed_entities=allowed_entities, out_path_base=out_path_base, **inputs)
         self._file_patterns += tuple(extra_bids_patterns)
