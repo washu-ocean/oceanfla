@@ -124,6 +124,6 @@ def make_regressor_run_specific(regressor_name:str, bids_source_file:str|Path=No
             raise RuntimeError("'run' and 'task' parameters must be provided if 'bids_source_file' is not provided.")
         from ..config import get_bids_file
         bidsfile = get_bids_file(bids_source_file)
-        run = int(bidsfile.entities.get("run", 1))
+        run = str(bidsfile.entities.get("run", "01"))
         task = bidsfile.entities["task"]
     return f"task-{task}-run-{run}-{regressor_name}"

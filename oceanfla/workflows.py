@@ -180,7 +180,7 @@ def build_session_wf(subject, session=None):
     for task, bold_list in space_run_info[all_opts.func_space].items():
         for bold_run in bold_list:
             bold_bids = get_bids_file(bold_run)
-            run = str(bold_bids.entities["run"]) if "run" in bold_bids.entities else "01"
+            run = str(bold_bids.entities.get("run", "01"))
 
             bold_run_identity_node = Node(
                 IdentityInterface(
@@ -596,7 +596,7 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
     for task, bold_list in run_map.items():
         for bold_run in bold_list:
             bold_bids = get_bids_file(bold_run)
-            run = str(bold_bids.entities["run"]) if "run" in bold_bids.entities else "01"
+            run = str(bold_bids.entities.get("run", "01"))
 
             bold_run_identity_node = Node(
                 IdentityInterface(
