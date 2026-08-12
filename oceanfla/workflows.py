@@ -816,25 +816,26 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
             ])
         ])
 
-    residual_bold_ds = Node(
-        FLADataSink(
-            base_directory=all_opts.datasink_path.parent,
-            out_path_base=all_opts.datasink_path.name,
-            extra_bids_patterns=all_opts.bids_patterns,
-            compress=need_compress,
-            dismiss_entities=["run", "den"],
-            desc="glmResidual",
-            task=all_opts.task_rename,
-            source_file=bold_runs_list
-        ),
-        name=f"{func_space}_residual_bold_ds"
-    )
-    workflow.connect([
-        (regression_wf, residual_bold_ds, [
-            ("outputnode.bold_file", "in_file"),
-            ("outputnode.execute", "execute")
-        ]),
-    ])
+    if all_opts.save_intermediates:
+        residual_bold_ds = Node(
+            FLADataSink(
+                base_directory=all_opts.datasink_path.parent,
+                out_path_base=all_opts.datasink_path.name,
+                extra_bids_patterns=all_opts.bids_patterns,
+                compress=need_compress,
+                dismiss_entities=["run", "den"],
+                desc="glmResidual",
+                task=all_opts.task_rename,
+                source_file=bold_runs_list
+            ),
+            name=f"{func_space}_residual_bold_ds"
+        )
+        workflow.connect([
+            (regression_wf, residual_bold_ds, [
+                ("outputnode.bold_file", "in_file"),
+                ("outputnode.execute", "execute")
+            ]),
+        ])
 
     r_squared_ds = Node(
         FLADataSink(
