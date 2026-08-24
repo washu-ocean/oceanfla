@@ -177,6 +177,7 @@ def build_session_wf(subject, session=None):
         name="merge_design_run_data"
     )
     # for task, bold_list in space_run_info[list(space_run_info.keys())[0]].items():
+    merge_index = 0
     for task, bold_list in space_run_info[all_opts.func_space].items():
         for bold_run in bold_list:
             bold_bids = get_bids_file(bold_run)
@@ -219,14 +220,16 @@ def build_session_wf(subject, session=None):
                     ("events", "inputnode.events_file"),
                 ]),
                 (extract_task_run_souce_node, design_merging_node, [
-                    ("confounds", f"confounds_x{run}")
+                    ("confounds", f"confounds_x{merge_index}")
                 ])
             ])
 
             # Connect the output of the ses-design workflow to the merging node
             for out_key in ses_design_wf.get_node("outputnode").outputs.get().keys():
                 workflow.connect(ses_design_wf, f"outputnode.{out_key}",
-                                 design_merging_node, f"{out_key}_x{run}")
+                                 design_merging_node, f"{out_key}_x{merge_index}")
+
+            merge_index += 1
 
 
     #### only doing one functional space at a time ######
