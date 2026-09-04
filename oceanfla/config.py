@@ -25,6 +25,10 @@ class Options():
         return cls._instance
 
     def __init__(self, opts=None):
+        self.layouts = getattr(self, "layouts", [])
+        self.log_queue = getattr(self, "log_queue", None)
+        self.log_process = getattr(self, "log_process", None)
+
         if not self._initialized and opts:
             # set up the global options
             option_msg_list = ["User Inputs:", "-"*30]
@@ -51,16 +55,17 @@ class Options():
             option_msg_list.append("-"*30)
 
             # start the logging subprocess
-            log_process, log_queue = config_logging_process(self.log_file, self.log_level, self.log_format)
-            setattr(self, 'log_queue', log_queue)
-            setattr(self, 'log_process', log_process)
-            for log_name in self.logger_names:
-                logger = get_logger(log_name, log_queue)
-                logger.setLevel(self.log_level)
-            
-            # log the arguments used for this run
-            logger = get_logger("nipype.utils")
-            logger.info("\n\t".join(option_msg_list))
+            if hasattr(self, "log_file") and hasattr(self, "log_level"):
+                log_process, log_queue = config_logging_process(self.log_file, self.log_level, self.log_format)
+                setattr(self, 'log_queue', log_queue)
+                setattr(self, 'log_process', log_process)
+                for log_name in self.logger_names:
+                    logger = get_logger(log_name, log_queue)
+                    logger.setLevel(self.log_level)
+
+                # log the arguments used for this run
+                logger = get_logger("nipype.utils")
+                logger.info("\n\t".join(option_msg_list))
 
             self._initialized = True
             self.bids_patterns = json.loads(self._pattern_file.read_text())["oceanfla_patterns"]
@@ -177,29 +182,32 @@ def config_logging_process(log_file, log_level=logging.INFO, log_fmt=None):
 
 
 def finish_logging():
-    try: 
+    try:
         logger = get_logger('nipype.utils')
         logger.info("Ending log")
     except:
         print("Ending log")
     finally:
-        if all_opts.log_process:
-            all_opts.log_queue.put_nowait(None)
-            all_opts.log_process.join()
+        log_process = getattr(all_opts, "log_process", None)
+        log_queue = getattr(all_opts, "log_queue", None)
+        if log_process is not None and log_queue is not None:
+            log_queue.put_nowait(None)
+            log_process.join()
     logging.shutdown()
     return
 
 
 def get_logger(name, q=None):
     if q is None:
-        q = all_opts.log_queue
-    
+        q = getattr(all_opts, "log_queue", None)
+
     logger = logging.getLogger(name)
-    has_queue_hdlr = any([isinstance(hdlr, QueueHandler) 
-                          for hdlr in logger.handlers])
-    if not has_queue_hdlr:
-        queue_handler = QueueHandler(q)
-        logger.addHandler(queue_handler)
+    if q is not None:
+        has_queue_hdlr = any([isinstance(hdlr, QueueHandler)
+                              for hdlr in logger.handlers])
+        if not has_queue_hdlr:
+            queue_handler = QueueHandler(q)
+            logger.addHandler(queue_handler)
 
     return logger
 

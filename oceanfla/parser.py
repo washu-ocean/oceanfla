@@ -12,7 +12,7 @@ VERSION = "1.0.7"
 
 logger = logging.getLogger("nipype.utils")
 
-def _build_parser():
+def _build_parser(arg_list=None):
 
     # Build out some useful argument types
     def ExistingPath(path):
@@ -325,16 +325,15 @@ def _build_parser():
 
     config_arguments.add_argument("--mem_gb", type=PositiveFloat, default=5,
                                   help="The amount of memory to use in GB for execution")
-
-    return (parser, config_arguments)
+    args = parser.parse_args(arg_list)
+    return (args, parser, config_arguments)
 
 
 # Function to parse the command line arguments and
 #   validate them before they become global options
 def parse_args():
 
-    parser, config_arguments = _build_parser()
-    args = parser.parse_args()
+    args, parser, config_arguments = _build_parser()
 
     # don't allow ambiguity when modeling variables two separate ways
     if args.hrf is not None and args.fir is not None:
@@ -460,3 +459,4 @@ def parse_args():
         logger.info("Removing previous outputs")
         clean_paths(sorted(old_outputs))
 
+    return args
