@@ -7,9 +7,81 @@ import pytest
 from unittest.mock import MagicMock
 from bids import BIDSLayout
 from bids.layout import BIDSLayoutIndexer
+from niworkflows.utils.testing import generate_bids_skeleton
+import shutil
 
 from oceanfla import config as config_module
 from oceanfla import workflows as workflows_module
+
+PREPROC_LAYOUT = {
+    "1001": [
+        {
+            "session":ses,
+            "func": [
+                *(
+                    {
+                        "task": "movie",
+                        "run": i, 
+                        "space": space,
+                        "suffix": "bold",
+                        "metadata": {
+                            "RepetitionTime": 2.0, 
+                            "TaskName": "movie"
+                        }
+                    }
+                    for space in ["MNI152NLin6Asym", "MNIInfant"]
+                    for i in range(2)
+                ) 
+            ],
+            "anat": [
+                *(
+                    {
+                        "hemi": hemi,
+                        "space": "fsLR",
+                        "suffix": "midthickness",
+                        "extension": ".surf.gii"
+                    }
+                    for hemi in ["L" "R"]
+                )
+            ]
+        }
+        for ses in ["01", "02"]
+    ],
+    "1002": "*"
+}
+
+RAW_LAYOUT = {
+    "1001": [
+        {
+            "session":ses,
+            "func": [
+                *(
+                    {
+                        "task": "movie",
+                        "run": i, 
+                        "suffix": "bold",
+                        "metadata": {
+                            "RepetitionTime": 2.0, 
+                            "TaskName": "movie"
+                        }
+                    }
+                    for i in range(2)
+                ),
+                *(
+                    {
+                        "task": "movie",
+                        "run": i,
+                        "suffix": "events",
+                        "extension": ".tsv"
+                    }
+                    for i in range(2)
+                )
+            ]
+        }
+        for ses in ["01", "02"]
+    ],
+    "1002": "*"
+}
 
 @pytest.fixture(autouse=True)
 def mock_global_logger(monkeypatch):
@@ -36,24 +108,63 @@ def dummy_nifti(tmp_path):
 
     return {
         "data": data,
+        "bold_img": img,
         "bold_path": bold_path,
         "mask_path": mask_path,
     }
 
 
-@pytest.fixture
-def all_opts_fixture(monkeypatch, tmp_path, dummy_bids_layout):
+@pytest.fixture(scope="session")
+def bids_layouts(tmp_path_factory, dummy_nifti):
+
+    base = tmp_path_factory.mktemp("dataset")
+    raw_bids_dir = base / "rawdata"
+    preproc_bids_dir = base / "derivatives" / "fmriprep"
+    generate_bids_skeleton(raw_bids_dir, RAW_LAYOUT)
+    generate_bids_skeleton(preproc_bids_dir, PREPROC_LAYOUT)
+
+    # for bold_file in raw_bids_dir.glob("**/sub*.nii.gz"):
+    #     nib.save(dummy_nifti["img"], bold_file)
+    
+    work_dir = base / "work"
+    work_dir.mkdir(exist_ok=True)
+
+    raw_bids_db_path = work_dir / f".raw_indexer"
+    raw_layout = BIDSLayout(
+        root=str(raw_bids_dir),
+        database_path=raw_bids_db_path,
+        validate=False,
+        indexer=BIDSLayoutIndexer(index_metadata=False),
+    )
+    preproc_bids_db_path = work_dir / f".preproc_indexer"
+    preproc_layout = BIDSLayout(
+        root=str(preproc_bids_dir),
+        database_path=preproc_bids_db_path,
+        validate=False,
+        is_derivative=True,
+        indexer=BIDSLayoutIndexer(index_metadata=False),
+    )
+    return {
+        "raw_root": raw_bids_dir,
+        "preproc_root": preproc_bids_dir,
+        "raw_layout": raw_layout,
+        "preproc_layout": preproc_layout,
+        "work_dir":work_dir,
+    }
+
+
+def make_all_opts(dummy_bids_layout, dummy_nifti, **kwargs):
     opts = SimpleNamespace(
         task=["oddball"],
         task_rename="oddball",
-        subject=["01"],
-        session=None,
+        subject=["1001", "1002"],
+        session=["01"],
         func_space="MNI152NLin6Asym",
         preproc_layout=dummy_bids_layout["preproc_layout"],
         raw_layout=dummy_bids_layout["raw_layout"],
         preproc_bids=dummy_bids_layout["preproc_root"],
         raw_bids=dummy_bids_layout["raw_root"],
-        brain_mask=str(dummy_bids_layout["mask_path"]),
+        brain_mask=str(dummy_nifti["mask_path"]),
         fd_threshold=0.5,
         minimum_unmasked_neighbors=0,
         start_censoring=0,
@@ -74,7 +185,7 @@ def all_opts_fixture(monkeypatch, tmp_path, dummy_bids_layout):
         generic_nuisance_columns=[],
         volterra_lag=None,
         volterra_columns=[],
-        datasink_path=tmp_path / "output",
+        datasink_path=dummy_bids_layout["preproc_root"],
         bids_patterns=[],
         save_intermediates=False,
         filter_padtype="mean",
@@ -96,100 +207,8 @@ def all_opts_fixture(monkeypatch, tmp_path, dummy_bids_layout):
         stdscale_glm="sesLevel",
     )
 
-    monkeypatch.setattr(config_module, "all_opts", opts)
-    monkeypatch.setattr(workflows_module, "all_opts", opts)
+    for k, v in kwargs.items():
+        setattr(opts, k, v)
+
     return opts
 
-
-@pytest.fixture
-def dummy_bids_layout(tmp_path, dummy_nifti):
-    raw_root = tmp_path / "raw_bids"
-    preproc_root = tmp_path / "derivatives" / "fmriprep"
-
-    raw_root.mkdir(parents=True, exist_ok=True)
-    preproc_root.mkdir(parents=True, exist_ok=True)
-
-    work_dir = tmp_path / "work"
-    work_dir.mkdir(exist_ok=True)
-
-    (raw_root / "dataset_description.json").write_text(
-        '{"Name": "dummy_raw_bids", "BIDSVersion": "1.8.0"}'
-    )
-    (preproc_root / "dataset_description.json").write_text(
-        '{"Name": "dummy_preproc_bids", "BIDSVersion": "1.8.0", "GeneratedBy": [{"Name": "dummy"}]}'
-    )
-
-    raw_func_dir = raw_root / "sub-01" / "ses-01" / "func"
-    preproc_func_dir = preproc_root / "sub-01" / "ses-01" / "func"
-    raw_func_dir.mkdir(parents=True)
-    preproc_func_dir.mkdir(parents=True)
-
-    bold_file = raw_func_dir / "sub-01_ses-01_task-oddball_run-01_bold.nii.gz"
-    nib.save(nib.Nifti1Image(dummy_nifti["data"], np.eye(4)), bold_file)
-    raw_json = raw_func_dir / "sub-01_ses-01_task-oddball_run-01_bold.json"
-    raw_json.write_text('{"RepetitionTime": 2.0, "TaskName": "oddball"}')
-
-    bold_file = raw_func_dir / "sub-01_ses-01_task-oddball_run-02_bold.nii.gz"
-    nib.save(nib.Nifti1Image(dummy_nifti["data"], np.eye(4)), bold_file)
-    raw_json = raw_func_dir / "sub-01_ses-01_task-oddball_run-02_bold.json"
-    raw_json.write_text('{"RepetitionTime": 2.0, "TaskName": "oddball"}')
-
-    proc_file = preproc_func_dir / "sub-01_ses-01_task-oddball_run-01_space-MNI152NLin6Asym_desc-preproc_bold.nii.gz"
-    nib.save(nib.Nifti1Image(dummy_nifti["data"], np.eye(4)), proc_file)
-    preproc_json = preproc_func_dir / "sub-01_ses-01_task-oddball_run-01_space-MNI152NLin6Asym_desc-preproc_bold.json"
-    preproc_json.write_text('{"RepetitionTime": 2.0, "TaskName": "oddball"}')
-    proc_file = preproc_func_dir / "sub-01_ses-01_task-oddball_run-02_space-MNI152NLin6Asym_desc-preproc_bold.nii.gz"
-    nib.save(nib.Nifti1Image(dummy_nifti["data"], np.eye(4)), proc_file)
-    preproc_json = preproc_func_dir / "sub-01_ses-01_task-oddball_run-02_space-MNI152NLin6Asym_desc-preproc_bold.json"
-    preproc_json.write_text('{"RepetitionTime": 2.0, "TaskName": "oddball"}')
-
-    proc_file = preproc_func_dir / "sub-01_ses-01_task-oddball_run-01_space-MNIInfant_desc-preproc_bold.nii.gz"
-    nib.save(nib.Nifti1Image(dummy_nifti["data"], np.eye(4)), proc_file)
-    preproc_json = preproc_func_dir / "sub-01_ses-01_task-oddball_run-01_space-MNIInfant_desc-preproc_bold.json"
-    preproc_json.write_text('{"RepetitionTime": 2.0, "TaskName": "oddball"}')
-    proc_file = preproc_func_dir / "sub-01_ses-01_task-oddball_run-02_space-MNIInfant_desc-preproc_bold.nii.gz"
-    nib.save(nib.Nifti1Image(dummy_nifti["data"], np.eye(4)), proc_file)
-    preproc_json = preproc_func_dir / "sub-01_ses-01_task-oddball_run-02_space-MNIInfant_desc-preproc_bold.json"
-    preproc_json.write_text('{"RepetitionTime": 2.0, "TaskName": "oddball"}')
-
-    events_file = raw_func_dir / "sub-01_ses-01_task-oddball_run-01_events.tsv"
-    events_file.write_text("onset\tduration\ttrial_type\n0\t2\toddball\n")
-    events_file = raw_func_dir / "sub-01_ses-01_task-oddball_run-02_events.tsv"
-    events_file.write_text("onset\tduration\ttrial_type\n0\t2\toddball\n")
-
-    confounds_file = preproc_func_dir / "sub-01_ses-01_task-oddball_run-01_desc-confounds_timeseries.tsv"
-    confounds_file.write_text("framewise_displacement\ttrans_x\n0.0\t0.1\n")
-    confounds_file = preproc_func_dir / "sub-01_ses-01_task-oddball_run-02_desc-confounds_timeseries.tsv"
-    confounds_file.write_text("framewise_displacement\ttrans_x\n0.0\t0.1\n")
-
-    mask_path = preproc_root / "sub-01" / "ses-01" / "func" / "brain_mask.nii.gz"
-    nib.save(nib.Nifti1Image(np.ones((10, 11, 12), dtype=np.uint8), np.eye(4)), mask_path)
-
-    raw_bids_db_path = work_dir / f".raw_indexer"
-    raw_layout = BIDSLayout(
-        root=str(raw_root),
-        database_path=raw_bids_db_path,
-        validate=False,
-        indexer=BIDSLayoutIndexer(index_metadata=False),
-    )
-    preproc_bids_db_path = work_dir / f".preproc_indexer"
-    preproc_layout = BIDSLayout(
-        root=str(preproc_root),
-        database_path=preproc_bids_db_path,
-        validate=False,
-        is_derivative=True,
-        indexer=BIDSLayoutIndexer(index_metadata=False),
-    )
-
-    return {
-        "raw_root": raw_root,
-        "preproc_root": preproc_root,
-        "raw_layout": raw_layout,
-        "preproc_layout": preproc_layout,
-        "work_dir":work_dir,
-        "bold_file": proc_file,
-        "events_file": events_file,
-        "confounds_file": confounds_file,
-        "raw_bold_file": bold_file,
-        "mask_path": mask_path,
-    }
