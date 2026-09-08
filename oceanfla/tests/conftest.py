@@ -115,7 +115,7 @@ def dummy_nifti(tmp_path):
 
 
 @pytest.fixture(scope="session")
-def bids_layouts(tmp_path_factory, dummy_nifti):
+def bids_layouts(tmp_path_factory):
 
     base = tmp_path_factory.mktemp("dataset")
     raw_bids_dir = base / "rawdata"
@@ -152,18 +152,18 @@ def bids_layouts(tmp_path_factory, dummy_nifti):
         "work_dir":work_dir,
     }
 
-
-def make_all_opts(dummy_bids_layout, dummy_nifti, **kwargs):
+@pytest.fixture
+def opts(request, bids_layouts, dummy_nifti):
     opts = SimpleNamespace(
-        task=["oddball"],
-        task_rename="oddball",
+        task=["movie"],
+        task_rename="movie",
         subject=["1001", "1002"],
-        session=["01"],
+        session="01",
         func_space="MNI152NLin6Asym",
-        preproc_layout=dummy_bids_layout["preproc_layout"],
-        raw_layout=dummy_bids_layout["raw_layout"],
-        preproc_bids=dummy_bids_layout["preproc_root"],
-        raw_bids=dummy_bids_layout["raw_root"],
+        preproc_layout=bids_layouts["preproc_layout"],
+        raw_layout=bids_layouts["raw_layout"],
+        preproc_bids=bids_layouts["preproc_root"],
+        raw_bids=bids_layouts["raw_root"],
         brain_mask=str(dummy_nifti["mask_path"]),
         fd_threshold=0.5,
         minimum_unmasked_neighbors=0,
@@ -185,13 +185,13 @@ def make_all_opts(dummy_bids_layout, dummy_nifti, **kwargs):
         generic_nuisance_columns=[],
         volterra_lag=None,
         volterra_columns=[],
-        datasink_path=dummy_bids_layout["preproc_root"],
+        datasink_path=bids_layouts["preproc_root"],
         bids_patterns=[],
         save_intermediates=False,
         filter_padtype="mean",
         filter_padlen=50,
-        work_dir=dummy_bids_layout["work_dir"],
-        work=dummy_bids_layout["work_dir"],
+        work_dir=bids_layouts["work_dir"],
+        work=bids_layouts["work_dir"],
         debug=False,
         highpass=None,
         lowpass=None,
@@ -201,12 +201,15 @@ def make_all_opts(dummy_bids_layout, dummy_nifti, **kwargs):
         run_exclusion_threshold=0.0,
         min_average_tsnr=0.0,
         percent_change=False,
-        layouts=[dummy_bids_layout["preproc_layout"], dummy_bids_layout["raw_layout"]],
+        layouts=[bids_layouts["preproc_layout"], bids_layouts["raw_layout"]],
         exclusion_file=None,
         fwhm=None,
         stdscale_glm="sesLevel",
+        n_procs=4,
+        mem_gb=5
     )
 
+    kwargs = request.param
     for k, v in kwargs.items():
         setattr(opts, k, v)
 

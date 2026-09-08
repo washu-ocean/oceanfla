@@ -1,14 +1,15 @@
 import pytest
-from oceanfla.tests.conftest import make_all_opts
 from oceanfla import workflows as workflows_module
 
 
-@pytest.mark.parametrize("opts", [
-    make_all_opts(),
-    make_all_opts(session=None),
-    make_all_opts(fwhm=4)
-
-])
+@pytest.mark.parametrize(
+    "opts", [
+        {},
+        {"session":None},
+        {"fwhm":4}
+    ], 
+    indirect=True
+)
 def test_build_oceanfla_wf_returns_workflow(
         monkeypatch, 
         tmp_path, 
@@ -19,10 +20,18 @@ def test_build_oceanfla_wf_returns_workflow(
     wf = workflows_module.build_oceanfla_wf(subjects=opts.subject, base_dir=tmp_path)
 
     assert wf is not None
-    assert wf.name == "oceanfla_task_oddball_wf"
+    assert wf.name == f"oceanfla_task_{opts.task_rename}_wf"
     
 
-@pytest.mark.parametrize("opts", [make_all_opts()])
+@pytest.mark.parametrize(
+    "opts", [
+        {},
+        {"ignore":["event1"]},
+        {"save_intermediates":True},
+        {"repetition_time":1.5}
+    ],
+    indirect=True
+)
 def test_build_ses_design_wf_creates_workflow(monkeypatch, opts):
     monkeypatch.setattr(workflows_module, "all_opts", opts)
     wf = workflows_module.build_ses_design_wf(run="01", task="oddball")
@@ -30,22 +39,28 @@ def test_build_ses_design_wf_creates_workflow(monkeypatch, opts):
     assert wf is not None
     assert "task_oddball_run_01_design_wf" in wf.name
 
+    if opts.group or opts.ignore:
+        assert wf.get_node('modify_events_file_node') is not None
 
-def test_parse_session_bold_files_uses_fixture_layout(dummy_bids_layout):
-    layout = dummy_bids_layout["preproc_layout"]
+    if opts.save_intermediates:
+        assert wf.get_node("event_matrix_ds") is not None
+
+    if not opts.repetition_time:
+        assert wf.get_node(f"task_oddball_run_01_get_metadata_node") is not None
+    else:
+        assert wf.get_node("events_matrix_node").interface.inputs.tr == opts.repetition_time
+
+
+def test_parse_session_bold_files_uses_fixture_layout(bids_layouts):
+    layout = bids_layouts["preproc_layout"]
     run_info = workflows_module.parse_session_bold_files(
         layout=layout,
-        subject="01",
+        subject="1001",
         session="01",
-        tasks=["oddball"],
+        tasks=["movie"],
     )
 
     assert ("MNI152NLin6Asym" in run_info) and ("MNIInfant" in run_info)
-    assert "oddball" in run_info["MNI152NLin6Asym"]
-    assert len(run_info["MNI152NLin6Asym"]["oddball"]) == 2
+    assert "movie" in run_info["MNI152NLin6Asym"]
+    assert len(run_info["MNI152NLin6Asym"]["movie"]) == 2
 
-
-def test_dummy_bids_layout_has_expected_files(dummy_bids_layout):
-    assert dummy_bids_layout["bold_file"].exists()
-    assert dummy_bids_layout["events_file"].exists()
-    assert dummy_bids_layout["confounds_file"].exists()
