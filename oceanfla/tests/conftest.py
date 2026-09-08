@@ -92,6 +92,7 @@ def mock_global_logger(monkeypatch):
     monkeypatch.setattr(config_module, "config_logging_process", lambda *args, **kwargs: (mock_process, MagicMock()))
     monkeypatch.setattr(config_module, "get_logger", lambda name, q=None: mock_logger)
     monkeypatch.setattr(workflows_module, "get_logger", lambda name, q=None: mock_logger)
+    monkeypatch.setattr(workflows_module, "logger", mock_logger)
 
     yield mock_logger
 

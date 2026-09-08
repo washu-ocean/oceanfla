@@ -6,21 +6,32 @@ from oceanfla import workflows as workflows_module
     "opts", [
         {},
         {"session":None},
-        {"fwhm":4}
+        {"fwhm":4},
+        {"task":["oddball"]}
     ], 
     indirect=True
 )
 def test_build_oceanfla_wf_returns_workflow(
         monkeypatch, 
-        tmp_path, 
-        opts
+        tmp_path,
+        opts,
+        mock_global_logger
         ):
 
     monkeypatch.setattr(workflows_module, "all_opts", opts)
     wf = workflows_module.build_oceanfla_wf(subjects=opts.subject, base_dir=tmp_path)
 
-    assert wf is not None
-    assert wf.name == f"oceanfla_task_{opts.task_rename}_wf"
+    if opts.task != ["movie"]:
+        assert wf is None
+        mock_global_logger.warning.assert_any_call("NO WORKFLOWS WERE CREATED, EXITING NOW")
+        mock_global_logger.warning.assert_any_call(f"NO BOLD RUNS FOUND FOR SUBJECT:1001, SESSION:01, TEMPLATE_SPACE:{opts.func_space}")
+    else:
+        assert wf is not None
+        assert wf.name == f"oceanfla_task_{opts.task_rename}_wf"
+        mock_global_logger.info.assert_any_call(f"creating the functional-space-level workflow: space_{opts.func_space}_wf")
+
+    mock_global_logger.info.assert_any_call(f"creating the session-level workflow: sub_1001_ses_01_wf")
+    
     
 
 @pytest.mark.parametrize(
