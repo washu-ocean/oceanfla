@@ -52,10 +52,8 @@ def parse_session_bold_files(layout:bids.BIDSLayout, subject:str, session:str, t
         A dictionary organizing BOLD run numbers by task and functional space
     
     '''
-    print(layout)
     files = layout.get(subject=subject, session=session, task=tasks, suffix="bold", datatype="func", extension=[".nii",".nii.gz",".dtseries.nii"])
     space_run_dict = dict()
-    print(files)
     for f in files:
         # get entities
         # run = f.entities["run"] if "run" in f.entities else PaddedInt('01')
