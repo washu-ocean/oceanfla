@@ -5,7 +5,7 @@ from nipype.interfaces.utility import IdentityInterface, Select
 from oceanfla.interfaces.reporting import PlotDesign, ReportExclusions
 from oceanfla.interfaces.utility import FLADataSink, ReadMetadataFile
 from oceanfla.interfaces.clean import FilterData, PercentChange
-from oceanfla.interfaces.events import EventsMatrix, ModifyEventsFile, get_number_of_volumes
+from oceanfla.interfaces.events import EventsMatrix, FindContinuousVars, ModifyEventsFile, get_number_of_volumes
 from oceanfla.interfaces.exclusions import CheckExclusionFile, CheckRunRetention, CheckRuntSNR, MakeRunExclusionTable
 from oceanfla.interfaces.nuisance import GenerateNuisanceMatrix
 from oceanfla.interfaces.regression import CombineFIRBetas, ConcatRegressionData, MakeRunDesign, RunGLMRegression
@@ -346,7 +346,8 @@ def build_ses_design_wf(run, task):
             fir_vars=all_opts.fir_vars,
             hrf_vars=all_opts.hrf_vars,
             unmodeled=all_opts.unmodeled,
-            parameters=all_opts.parametric_modulators
+            parameters=all_opts.parametric_modulators,
+            continuous_columns=all_opts.continuous_columns
         ),
         name="events_matrix_node"
     )
@@ -356,6 +357,7 @@ def build_ses_design_wf(run, task):
         ])
     ])
 
+    ### Group task regressors of ignore some if requested ###
     if all_opts.group or all_opts.ignore:
         modify_events_file_node = Node(
             ModifyEventsFile(
@@ -379,6 +381,7 @@ def build_ses_design_wf(run, task):
             ])
         ])
 
+    ### Get the TR if needed ###
     if all_opts.repetition_time:
         events_matrix_node.inputs.tr = all_opts.repetition_time
     else:
@@ -395,6 +398,26 @@ def build_ses_design_wf(run, task):
             ]),
             (get_metadata_node, events_matrix_node, [
                 ("RepetitionTime", "tr")
+            ])
+        ])
+
+    ### Get other continuous variables if requested ###
+    if all_opts.continuous_vars:
+        find_continuous_vars_node = Node(
+            FindContinuousVars(
+                continuous_var_path=all_opts.continuous_vars,
+                task=task,
+                run=run
+            ),
+            name="find_continuous_vars_node"
+        )
+        workflow.connect([
+            (inputnode, find_continuous_vars_node, [
+                ("subject", "subject"),
+                ("session", "session")
+            ]),
+            (find_continuous_vars_node, events_matrix_node, [
+                ("continuous_vars_file", "continuous_vars_file")
             ])
         ])
 

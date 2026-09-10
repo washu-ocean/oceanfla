@@ -39,6 +39,7 @@ class _GenerateNuisanceMatrixInputSpec(BaseInterfaceInputSpec):
 class _GenerateNuisanceMatrixOutputSpec(TraitedSpec):
     nuisance_matrix = traits.Union(
         File(exists=True),
+        None,
         desc="Outputted nuisance matrix as a file."
     )
 
@@ -79,17 +80,18 @@ def generate_nuisance_matrix(confounds_file: str,
     # if (confounds_columns is None) 5
 
     select_columns = set(confounds_columns)
-    if spike_threshold:
-        select_columns.add("framewise_displacement")
+    select_columns.add("framewise_displacement")
     if volterra_columns:
         select_columns.update(volterra_columns)
     suffix = "." + confounds_file.split(".")[-1]
     if suffix == ".csv":
-        nuisance = pd.read_csv(confounds_file).loc[:,list(select_columns)]
+        sep = ","
     elif suffix == ".tsv":
-        nuisance = pd.read_csv(confounds_file, sep='\t').loc[:,list(select_columns)]
+        sep = "\t"
     else:
-        raise ValueError("Invalid suffix (must be .csv or .tsv)")
+        raise ValueError(f"Invalid suffix for file <{confounds_file}> (must be .csv or .tsv)")
+    
+    nuisance = pd.read_csv(confounds_file, sep=sep).loc[:,list(select_columns)]
     # if "framewise_displacement" in select_columns:
     #     nuisance.loc[0, "framewise_displacement"] = 0
     if spike_threshold:
@@ -100,7 +102,7 @@ def generate_nuisance_matrix(confounds_file: str,
                 nuisance[spike_col] = 0
                 nuisance.loc[a, spike_col] = 1
                 b += 1
-    if ("framewise_displacement" not in confounds_columns) and ("framewise_displacement" in nuisance.columns.to_list()):
+    if ("framewise_displacement" not in confounds_columns) and ("framewise_displacement" in nuisance.columns):
         nuisance.drop(columns="framewise_displacement", inplace=True)
     if demean:
         nuisance[make_regressor_run_specific("mean", bids_source_file=confounds_file)] = 1
@@ -112,9 +114,12 @@ def generate_nuisance_matrix(confounds_file: str,
                 nuisance.loc[:, f"{vc}_{lag + 1}"] = nuisance.loc[:, vc].shift(lag + 1)
         nuisance.fillna(0, inplace=True)
 
-    out_file = replace_entities(confounds_file, {"suffix":"nuisance-matrix", "ext":".tsv", "path":None})
-    nuisance.to_csv(out_file, sep="\t", index=False)
-    return out_file
+    if len(nuisance.columns.to_list()) == 0:
+        return None
+    else:
+        out_file = replace_entities(confounds_file, {"suffix":"nuisance-matrix", "ext":".tsv", "path":None})
+        nuisance.to_csv(out_file, sep="\t", index=False)
+        return out_file
     
 
 

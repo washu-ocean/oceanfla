@@ -50,6 +50,18 @@ class EventsMatrixInputSpec(BaseInterfaceInputSpec):
         None,
         default_value=None)
 
+    continuous_vars_file = traits.Union(
+        None,
+        traits.File(exists=True),
+        default_value=None,
+        desc="A file containing continuous variables to include in the model")
+
+    continuous_columns = traits.Union(
+        traits.List(trait=traits.Str,
+                    desc="A list of columns from the 'continuous_vars_file' to include as regressors"),
+        None,
+        default_value=None)
+
     volumes = traits.Int(
         desc="The number of volumes that are in the corresponding BOLD run")
 
@@ -76,7 +88,9 @@ class EventsMatrix(SimpleInterface):
             hrf=self.inputs.hrf,
             hrf_vars=self.inputs.hrf_vars,
             unmodeled=self.inputs.unmodeled,
-            parameters=self.inputs.parameters
+            parameters=self.inputs.parameters,
+            continuous_vars_file=self.inputs.continuous_vars_file,
+            continuous_columns=self.inputs.continuous_columns
         )
 
         return runtime
@@ -90,18 +104,21 @@ def make_design_matrix(event_file: str | Path,
                        fir_vars: list[str] = None,
                        hrf_vars: list[str] = None,
                        unmodeled: list[str] = None,
-                       parameters: list[str] = None):
+                       parameters: list[str] = None,
+                       continuous_vars_file: str = None,
+                       continuous_columns: list[str] = None):
     from oceanfla.utilities import replace_entities
     import pandas as pd
     import numpy as np
     from textwrap import dedent
     from oceanfla.config import get_logger
+    from pathlib import Path
     logger = get_logger("nipype.interface")
 
     events_long = make_events_long(event_file, volumes, tr)
     events_matrix = events_long.copy()
 
-    parametric_mod_regressors = make_parametric_modulation_regressors(event_file, parameters, volumes, tr) if parameters else None
+    parametric_mod_regressors = make_parametric_modulation_regressors(event_file, parameters, volumes, tr, cwd=Path().resolve()) if parameters else None
 
     # If both FIR and HRF are specified, we should have at least one list
     # of columns for one of the categories specified.
@@ -183,7 +200,15 @@ def make_design_matrix(event_file: str | Path,
         # assert len(convolved_parameters) == len(events_matrix), "The length of the parametric modulation regressors is different than the length of the trial event regressors"
         for p in parameters:
             events_matrix.loc[:, f"{p}-modulator"] = convolved_parameters.loc[:, p]
-    
+
+    if continuous_vars_file:
+        selected_continuous_vars = grab_continuous_vars(continuous_vars_file=continuous_vars_file,
+                                                        volumes=volumes,
+                                                        continuous_columns=continuous_columns,
+                                                        cwd=Path().resolve())
+        events_matrix = pd.concat([events_matrix.reset_index(drop=True), selected_continuous_vars.reset_index(drop=True)], axis=1)
+        events_matrix.fillna(0, inplace=True)
+
     if len(residual_conditions) > 0:
         logger.warning(dedent(f"""The following trial types were not selected under either of the specified models
                         and were also not selected to be left unmodeled. These variables will not be included in the design matrix:\n\t {residual_conditions}"""))
@@ -245,17 +270,14 @@ def make_events_long(event_file: Path, volumes: int, tr: float):
             j = find_nearest(events_long.index, offset)
             events_long.loc[i:j, events_df.loc[e, 'trial_type']] = 1
 
-    # if output_file and output_file.suffix == ".csv":
-    #     logger.debug(f" saving events long to file: {output_file}")
-    #     events_long.to_csv(output_file)
-
     return events_long
 
 
 def make_parametric_modulation_regressors(event_file: str|Path,
                                           parameters: list[str],
                                           volumes: int, 
-                                          tr: float):
+                                          tr: float,
+                                          cwd:Path=None):
     import pandas as pd
     import numpy as np
 
@@ -276,9 +298,39 @@ def make_parametric_modulation_regressors(event_file: str|Path,
         for p in parameters:
             para_mod_regressors.loc[i, p] = events_df.loc[e, p]
     para_mod_regressors = para_mod_regressors.fillna(0)
-    para_mod_regressors.to_csv("paramod_regressors.csv")
+    if cwd:
+        para_mod_regressors.to_csv(cwd/"paramod_regressors.csv")
     return para_mod_regressors
     
+
+def grab_continuous_vars(continuous_vars_file:str,
+                         volumes:int,
+                         continuous_columns: list[str]=None,
+                         cwd:Path=None):
+    import pandas as pd
+    from pathlib import Path
+    from oceanfla.config import get_logger
+    logger = get_logger("nipype.interface")
+
+    file_ext = Path(continuous_vars_file).suffix
+    if file_ext == ".csv":
+        sep = ","
+    elif file_ext == ".tsv":
+        sep = "\t"
+    else:
+        raise ValueError(f"Invalid suffix for file <{continuous_vars_file}> (must be .csv or .tsv)")
+    continuous_vars_df = pd.read_csv(continuous_vars_file, sep=sep)
+    if continuous_columns:
+        for cv_col in continuous_columns:
+            if cv_col not in continuous_vars_df.columns:
+                raise ValueError(f"column <{cv_col}> not present in file <{continuous_vars_file}>")
+    else:
+        continuous_columns = continuous_vars_df.columns.to_list()
+
+    select_cv_df = continuous_vars_df.loc[:volumes-1, continuous_columns]
+    if cwd:
+        select_cv_df.to_csv(cwd/"selected_continuous_variables.csv")
+    return select_cv_df
 
 def hrf_convolve_features(features,
                            column_names: list = None,
@@ -444,3 +496,138 @@ def modify_events_file(events_file: str | Path,
         events_file, {"suffix": "modified-events", "ext": ".tsv", "path": None})
     events_df.to_csv(out_file, sep="\t", index=False)
     return out_file
+
+
+class FindContinuousVarsInputSpec(BaseInterfaceInputSpec):
+    continuous_var_path = traits.Union(
+        traits.List(
+            trait=traits.Union(
+                traits.File(exists=True),
+                traits.Directory(exists=True)
+            )
+        ),
+        traits.Directory(exists=True),
+        traits.File(exists=True),
+        desc="A list of files or directories to find the appropriate file from"
+    )
+    subject = traits.Str(
+            mandatory=True,
+            desc="The subject ID to check for"
+        )
+    session = traits.Union(
+        None,
+        traits.Str(),
+        default_value=None,
+        desc="The session ID to check for"
+    )
+    task = traits.Str(
+        mandatory=True,
+        desc="The task name to check for"
+    )
+    run = traits.Str(
+        mandatory=True,
+        desc="The run number to check for"
+    )
+
+
+class FindContinuousVarsOutputSpec(TraitedSpec):
+    continuous_vars_file = traits.Union(
+        traits.File(exists=True),
+        None,
+        desc="A continuous variables file that matches the provided entities or None"
+    )
+
+class FindContinuousVars(SimpleInterface):
+    input_spec = FindContinuousVarsInputSpec
+    output_spec = FindContinuousVarsOutputSpec
+
+    def _run_interface(self, runtime):
+        self._results["continuous_vars_file"] = find_continuous_vars(
+            cv_paths=self.inputs.continuous_var_path,
+            subject=self.inputs.subject,
+            task=self.inputs.task,
+            session=self.inputs.session,
+            run=self.inputs.run
+        )
+        return runtime
+
+
+def find_continuous_vars(cv_paths: list[str]|str, 
+                         subject: str,
+                         task: str,
+                         run: str,
+                         session: str = None):
+    from pathlib import Path
+    from bids.layout import parse_file_entities
+    from oceanfla.config import get_logger
+    from bids.utils import listify
+
+    logger = get_logger("nipype.interface")
+
+    required_suffix = "continuousVars"
+
+    match_entities = {
+        "subject": subject,
+        "run": run
+    }
+    if session:
+        match_entities["session"] = session
+
+    cv_paths = listify(cv_paths)
+    possible_file_matches = []
+    for cv_path in cv_paths:
+        cv_path = Path(cv_path)
+        if cv_path.is_dir():
+            possible_file_matches.extend(sorted(cv_paths.glob(f"**/[!.]*task-{task}*_{required_suffix}.[tc]sv")))
+        elif cv_path.is_file() and (cv_path.suffix == ".csv" or cv_path.suffix == ".tsv"):
+            cv_ents = parse_file_entities(str(cv_path.resolve()))
+            if ("task" in cv_ents) and (cv_ents["task"] == task)\
+                and ("suffix" in cv_ents) and (cv_ents["suffix"] == required_suffix):
+                possible_file_matches.append(cv_path)
+
+    cv_match = mostEntityMatches(match_entities, possible_file_matches)
+    if cv_match:
+        logger.info(f"found continuous variables file <{cv_match}> for task:{task}, subject:{subject}, session:{session}, run:{run}")
+    else:
+        logger.info(f"did not find a continuous variables file for task:{task}, subject:{subject}, session:{session}, run:{run}")
+    return cv_match
+
+
+def mostEntityMatches(source_entities, file_list):
+    if len(file_list) == 0:
+        return None
+    if len(file_list) == 1:
+        return file_list[0]
+    
+    from bids.layout import parse_file_entities
+    entity_points = {
+        "run": 4,
+        "subject":3,
+        "session":2
+    }
+    if "session" in source_entities:
+        entity_points["session"] = 2
+
+    file_point_list = []
+    for file in file_list:
+        file_ents = parse_file_entities(str(file.resolve()))
+        points = 0
+        for entity, ent_points in entity_points.items():
+            if entity in file_ents:
+                if entity not in source_entities:
+                    points = -1
+                    break
+                elif source_entities[entity] == file_ents[entity]:
+                    points += ent_points
+                else:
+                    points = -1
+                    break
+        if points >= 0:
+            file_point_list.append((file, points))
+
+    return max(file_point_list, default=None, key=lambda x: x[1])[0]
+                                        
+
+    
+
+

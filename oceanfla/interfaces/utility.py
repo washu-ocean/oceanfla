@@ -117,14 +117,21 @@ def extract_task_run_file(bids_list: list,
                            run_needed: str):
     from bids.layout import parse_file_entities
     from pathlib import Path
+
+    none_in_list = False
     
     for file in bids_list:
+        if file is None:
+            none_in_list = True
+            continue
         fpath = Path(file)
         parse_path = Path(fpath.parent.name) / fpath.name
         bids_file_entities = parse_file_entities(str(parse_path))
         run = int(bids_file_entities.get("run", 1))
         if run == int(run_needed) and bids_file_entities["task"] == task_needed:
             return file
+    if none_in_list:
+        return None
     raise RuntimeError(
         f"Could not find a file with entities task-{task_needed}, run-{run_needed}")
 
@@ -207,8 +214,8 @@ class OptionalInterfaceSpec(DynamicTraitedSpec):
             current_trait = self.traits()[trait_name]
             if hasattr(current_trait, "name_source"):
                 continue
-            # if self.remove_trait(trait_name):
-            self.add_trait(
+            self.remove_trait(trait_name)
+            self.add_class_trait(
                 trait_name,
                 traits.Union(
                     current_trait,
@@ -224,6 +231,57 @@ class OptionalInterfaceSpec(DynamicTraitedSpec):
             # if trait_name == "execute":
             #     trait_set_value = True
             self.trait_set(**{trait_name: inital_trait_values[trait_name]})
+
+    # def __init__(self, **kwargs):
+    #     # 1. Inspect class-level traits before running standard initialization
+    #     # 'class_traits' holds the pre-defined traits of the class
+    #     for trait_name, trait_wrapper in self.class_traits().items():
+            
+    #         # Avoid modifying internal/private traits or already modified ones
+    #         if trait_name.startswith('_') or trait_name == 'trait_added':
+    #             continue
+                
+    #         # Extract the actual trait type object from the wrapper
+    #         original_trait = trait_wrapper.handler
+
+    #         if (getattr(original_trait, 'is_event', False) or 
+    #             getattr(original_trait, 'is_notification', False) or
+    #             original_trait.__class__.__name__ in ('Event', 'Button')):
+    #             continue
+            
+    #         # 2. Re-register the trait as a Union of itself and None
+    #         # We set the default value to None
+
+    #         metadata = trait_wrapper.__dict__.copy()
+    #         metadata.pop('mandatory', None)
+            
+    #         # 💡 FIX FOR BOOL TRAITS: Use Enum to preserve the explicit None state
+    #         if original_trait.__class__.__name__ == 'Bool' or isinstance(original_trait, traits.Bool):
+    #             continue
+    #             optional_trait = traits.Enum(None, True, False, **metadata)
+    #         else:
+    #             # Standard validation for files, strings, integers, floats, etc.
+    #             if hasattr(original_trait, 'exists') and original_trait.exists:
+    #                 original_trait.exists = False
+    #                 metadata['exists'] = True 
+                
+    #             optional_trait = traits.Either(
+    #                 original_trait, 
+    #                 None,
+    #                 **metadata
+    #             )
+    #         if hasattr(self, trait_name):
+    #             delattr(self, trait_name)
+            
+    #         self.add_trait(
+    #             trait_name, 
+    #             optional_trait
+    #         )
+
+    #         self.__dict__[trait_name] = None
+            
+    #     # 3. Call the parent constructor so standard Nipype initialization can proceed
+    #     super(OptionalInterfaceSpec, self).__init__(**kwargs)
         
 
 
