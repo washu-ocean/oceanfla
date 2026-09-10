@@ -303,7 +303,6 @@ class ConcatRegressionDataInputSpec(OptionalInterfaceSpec):
     design_matrices_in = traits.Union(
         traits.List(),
         traits.File(exists=True),
-        None,
         desc="A list of event matrix files"
     )
     tmask_files_in = traits.Union(
