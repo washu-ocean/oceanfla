@@ -227,6 +227,15 @@ def _build_parser(arg_list=None):
                                   include at least 2, meaning the minimum argument length is 3 elements; at least two regressors to group, and the new name 
                                   of the variable. This argument can be used multiple times group, each use defines one new grouping. ex) '--group orig_event1 orig_event2 event_new'""")
 
+    config_arguments.add_argument("--continuous_vars", "-cv", nargs="+", type=ExistingPath,
+                                  help="""A List of paths to files or directories containing continuous variable files for each task, with optional specificity for subject, session, and run. 
+                                  Each file name must have BIDS style naming with at least the task entity defined and the BIDS suffix matching 'continuousVars'. All files must be csv or tsv 
+                                  files. All paths are parsed and the file with the most specific naming for a certain task, subject, session, and run will be used. If multiple files match 
+                                  the maximum specificity then the first file found during the search will be used.""")
+    
+    config_arguments.add_argument("--continuous_columns", "-cc", nargs="+",
+                                  help="The columns to grab from files inputted through the 'continuous_vars' argument. If this argument is not specified, then all columns will be used.")
+
     config_arguments.add_argument("--start_censoring", "-sc", type=PositiveInt, default=0,
                                   help="The number of frames to censor out at the beginning of each run. Typically used to censor scanner equilibrium time. Default is 0")
     

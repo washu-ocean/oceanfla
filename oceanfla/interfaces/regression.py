@@ -36,6 +36,10 @@ class RunGLMRegressionInputSpec(OptionalInterfaceSpec):
         usedefault=True,
         desc="The brain mask that accompanies volumetric data"
     )
+    # skip_regression = traits.Bool(
+    #     default_value=False,
+    #     desc="Whether the regression should be skipped or not"
+    # )
 
 
 class RunGLMRegressionOutputSpec(OptionalInterfaceSpec):
@@ -76,7 +80,7 @@ class RunGLMRegressionOutputSpec(OptionalInterfaceSpec):
 
     residual_bold_file = traits.File(
         exists=True,
-        desc=""
+        desc="The bold data after estimated contribution from regressors has been removed"
     ) 
 
 
@@ -85,6 +89,19 @@ class RunGLMRegression(OptionalInterface):
     output_spec = RunGLMRegressionOutputSpec
 
     def _run_interface(self, runtime):
+
+        # if self.inputs.skip_regression:
+        #     self._results["residual_bold_file"] = self.inputs.bold_file_in
+        #     self._results["execute"] = False
+        #     for output in ["beta_files",
+        #                    "tstat_files",
+        #                    "pval_files",
+        #                    "beta_labels",
+        #                    "r_squared_file",
+        #                    "mse_file",
+        #                    "masked_design_matrix"]:
+        #         self._results[output] = None
+        #     return runtime
 
         beta_files, tstat_files, pval_files, beta_labels, r_squared_file, mse_file, masked_design_file, func_residual_file = massuni_linGLM(
             func_file=self.inputs.bold_file_in,
@@ -286,6 +303,7 @@ class ConcatRegressionDataInputSpec(OptionalInterfaceSpec):
     design_matrices_in = traits.Union(
         traits.List(),
         traits.File(exists=True),
+        None,
         desc="A list of event matrix files"
     )
     tmask_files_in = traits.Union(
@@ -329,6 +347,10 @@ class ConcatRegressionDataOutputSpec(OptionalInterfaceSpec):
         traits.File(exists=True),
         desc="The concatenation of the input list 'tmask_files_in'"
     )
+    # skip_regression = traits.Bool(
+    #     default_value=False,
+    #     desc="Whether the regression should be skipped or not"
+    # )
 
 
 class ConcatRegressionData(OptionalInterface):
@@ -366,6 +388,9 @@ def combine_regression_data(task: str,
     import numpy as np
     import pandas as pd
 
+    # if design_matrix_files is None and len(func_list)==1:
+    #     return (func_list[0], None, None, True, True)
+
     lengths = [len(x) for x in
                [func_list, tmask_files, design_matrix_files, inclusion_list]
                if x]
@@ -376,7 +401,7 @@ def combine_regression_data(task: str,
     # remove any runs that are being excluded
     if inclusion_list:
         if not any(inclusion_list):
-            res_list = [None for data_list in [func_list, tmask_files, design_matrix_files]] + [False]
+            res_list = [None for data_list in [func_list, tmask_files, design_matrix_files]] + [False]#, True]
             return res_list
         
         remaining_data_lists = [[x for i, x in enumerate(data_list) if inclusion_list[i]]
@@ -437,6 +462,7 @@ def combine_regression_data(task: str,
     res_list.append(final_tmask)
 
     res_list.append(True)
+    # res_list.append(False)
     return res_list
 
 
@@ -492,6 +518,9 @@ def make_run_design_files(event_matrix: str,
     import pandas as pd
     import numpy as np
     from oceanfla.utilities import replace_entities
+    from oceanfla.config import get_logger
+
+    logger = get_logger("nipype.interface")
 
     event_df = pd.read_csv(event_matrix, sep="\t")
     main_design_file = replace_entities(
@@ -499,7 +528,7 @@ def make_run_design_files(event_matrix: str,
         {"suffix": "main-design", "ext": ".tsv", "path": None}
     )
     nuisance_design_file = replace_entities(
-        nuisance_matrix,
+        event_matrix,
         {"suffix": "nuisance-design", "ext": ".tsv", "path": None}
     )
     
@@ -523,13 +552,20 @@ def make_run_design_files(event_matrix: str,
         dc for dc in all_design_columns if dc not in nuisance_regressors]
     if len(main_regressors) < 1:
         raise ValueError("All regressor columns are being used for nuisance regression")
-    
-    nuisance_design = combo_df.loc[:, nuisance_regressors]
+
+    nuisance_regressors_to_grab = [nr for nr in nuisance_regressors if nr in combo_df.columns]
+    nuisance_regressors_ignored = [nr for nr in nuisance_regressors if nr not in combo_df.columns]
+    if len(nuisance_regressors_ignored) > 0:
+        logger.warning(f"Some nuisance regressors were not found and will be ignored: {nuisance_regressors_ignored}")
+
+    nuisance_design = combo_df.loc[:, nuisance_regressors_to_grab]
     main_design = combo_df.loc[:, main_regressors]
 
     main_design.to_csv(main_design_file, sep="\t", index=False)
+    if len(nuisance_design.columns.to_list()) < 1:
+        return main_design_file, None
+    
     nuisance_design.to_csv(nuisance_design_file, sep="\t", index=False)
-
     return main_design_file, nuisance_design_file
 
 
