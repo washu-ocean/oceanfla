@@ -482,6 +482,14 @@ class MakeRunDesignInputSpec(BaseInterfaceInputSpec):
         default_value=None,
         desc="A list of column names to be used for nuisance regression."
     )
+    removal_list = traits.Union(
+        traits.List(
+            item_trait=traits.Str
+        ),
+        None,
+        default_value=None,
+        desc="A list of regressors to remove from all design matrices"
+    )
 
 
 class MakeRunDesignOutputSpec(TraitedSpec):
@@ -506,14 +514,16 @@ class MakeRunDesign(SimpleInterface):
         self._results["main_design"], self._results["nuisance_design"] = make_run_design_files(
             event_matrix=self.inputs.event_matrix,
             nuisance_matrix=self.inputs.nuisance_matrix,
-            nuisance_regressors=self.inputs.nuisance_regressors
+            nuisance_regressors=self.inputs.nuisance_regressors,
+            removal_list=self.inputs.removal_list
         )
         return runtime
 
 
 def make_run_design_files(event_matrix: str,
                           nuisance_matrix: str = None,
-                          nuisance_regressors: list[str] = None):
+                          nuisance_regressors: list[str] = None,
+                          removal_list: list[str] = None):
     import pandas as pd
     import numpy as np
     from oceanfla.utilities import replace_entities
@@ -533,18 +543,24 @@ def make_run_design_files(event_matrix: str,
     
     combo_df = None
     if not nuisance_matrix:
-        if not nuisance_regressors:
-            return event_matrix, None
-        else:
-            combo_df = event_df
+        combo_df = event_df
     else:
         nuisance_df = pd.read_csv(nuisance_matrix, sep="\t")
         combo_df = pd.concat([event_df.reset_index(drop=True), 
                                 nuisance_df.reset_index(drop=True)], 
                               axis=1)
-        if not nuisance_regressors:
-            combo_df.to_csv(main_design_file, sep="\t", index=False)
-            return main_design_file, None
+
+    if removal_list:
+        clean_removal_list = [c for c in removal_list if c in combo_df.columns]
+        if len(clean_removal_list) > 0:
+            log_msg = f"removing the following columns <{clean_removal_list}> from design matrices: \n\t<{event_matrix}>"
+            if nuisance_matrix: log_msg += f"\n\t<{nuisance_matrix}>"
+            logger.info(log_msg)
+            combo_df.drop(columns=clean_removal_list, inplace=True)
+
+    if not nuisance_regressors:
+        combo_df.to_csv(main_design_file, sep="\t", index=False)
+        return main_design_file, None
     
     all_design_columns = combo_df.columns.to_list()
     main_regressors = [

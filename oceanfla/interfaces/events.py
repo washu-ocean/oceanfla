@@ -115,6 +115,13 @@ def make_design_matrix(event_file: str | Path,
     from pathlib import Path
     logger = get_logger("nipype.interface")
 
+    default_hrf_params = (5,10)
+    hrf_params = default_hrf_params
+    if isinstance(hrf, str):
+        hrf_params = (None, None)
+    elif isinstance(hrf, list):
+        hrf_params = hrf
+
     events_long = make_events_long(event_file, volumes, tr)
     events_matrix = events_long.copy()
 
@@ -173,10 +180,8 @@ def make_design_matrix(event_file: str | Path,
                                         column_names=hrf_conditions,
                                         time_col='index',
                                         units='s',
-                                        time_to_peak=(hrf[0] if isinstance(
-                                            hrf, list) else None),
-                                        undershoot_dur=(
-                                            hrf[1] if isinstance(hrf, list) else None),
+                                        time_to_peak=hrf_params[0],
+                                        undershoot_dur=hrf_params[1],
                                         custom_hrf=(hrf if isinstance(hrf, str) else None))
         for c in hrf_conditions:
             events_matrix[c] = cfeats[c]
@@ -184,12 +189,7 @@ def make_design_matrix(event_file: str | Path,
     events_matrix.sort_index(axis=1, inplace=True)
 
     if parametric_mod_regressors is not None:
-        if isinstance(hrf, str):
-            hrf_params = (None, None)
-        elif isinstance(hrf, list):
-            hrf_params = hrf
-        else:
-            hrf_params = (6, 12)
+        logger.info(f"convolving parametric modulation regressors with hrf parameters <{hrf_params}>")
         convolved_parameters = hrf_convolve_features(features=parametric_mod_regressors,
                                                       column_names=parameters,
                                                       time_col='index',
@@ -206,8 +206,29 @@ def make_design_matrix(event_file: str | Path,
                                                         volumes=volumes,
                                                         continuous_columns=continuous_columns,
                                                         cwd=Path().resolve())
-        events_matrix = pd.concat([events_matrix.reset_index(drop=True), selected_continuous_vars.reset_index(drop=True)], axis=1)
-        events_matrix.fillna(0, inplace=True)
+        continuous_columns_to_convolve = [c for c in selected_continuous_vars.columns.to_list() if c not in unmodeled] if unmodeled else selected_continuous_vars.columns.to_list()
+        selected_continuous_vars = pd.concat(
+            [
+                selected_continuous_vars, 
+                pd.DataFrame({"time": np.arange(0, (tr * volumes), tr)[:volumes]})
+            ],
+             axis=1).set_index("time")
+        selected_continuous_vars.fillna(0, inplace=True)
+        logger.info(f"convolving continuous variables with hrf parameters <{hrf_params}>")
+        convolved_continuous_vars = hrf_convolve_features(
+            features=selected_continuous_vars,
+            column_names=continuous_columns_to_convolve,
+            time_col='index',
+            units='s',
+            time_to_peak=hrf_params[0],
+            undershoot_dur=hrf_params[1],
+            custom_hrf=(hrf if isinstance(hrf, str) else None)
+        )
+        for cv in selected_continuous_vars.columns.to_list():
+            if cv in unmodeled:
+                events_matrix[cv] = selected_continuous_vars[cv]
+            else:
+                events_matrix[cv] = convolved_continuous_vars[cv]
 
     if len(residual_conditions) > 0:
         logger.warning(dedent(f"""The following trial types were not selected under either of the specified models
