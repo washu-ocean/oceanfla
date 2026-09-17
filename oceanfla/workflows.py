@@ -358,11 +358,10 @@ def build_ses_design_wf(run, task):
     ])
 
     ### Group task regressors of ignore some if requested ###
-    if all_opts.group or all_opts.ignore:
+    if all_opts.group:
         modify_events_file_node = Node(
             ModifyEventsFile(
                 trial_type_map=all_opts.group,
-                removal_list=all_opts.ignore,
             ),
             name="modify_events_file_node"
         )
@@ -450,7 +449,8 @@ def build_ses_design_wf(run, task):
 
     make_run_designs_node = Node(
         MakeRunDesign(
-            nuisance_regressors=nuisance_regressors
+            nuisance_regressors=nuisance_regressors,
+            removal_list=all_opts.ignore
         ),
         name="make_run_designs_node"
     )

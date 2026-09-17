@@ -8,7 +8,7 @@ import logging
 import bids
 from datetime import datetime
 
-VERSION = "1.0.8"
+VERSION = "1.0.9"
 
 logger = logging.getLogger("nipype.utils")
 
