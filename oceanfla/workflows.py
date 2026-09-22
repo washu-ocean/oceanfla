@@ -428,7 +428,7 @@ def build_ses_design_wf(run, task):
             linear_trend=(not all_opts.exclude_run_trend),
             spike_threshold=all_opts.fd_threshold if all_opts.spike_regression else None,
             volterra_lag=all_opts.volterra_lag,
-            volterra_columns=all_opts.volterra_columns,
+            volterra_columns=all_opts.volterra_columns
         ),
         name="nuisance_matrix_node"
     )
@@ -450,7 +450,8 @@ def build_ses_design_wf(run, task):
     make_run_designs_node = Node(
         MakeRunDesign(
             nuisance_regressors=nuisance_regressors,
-            removal_list=all_opts.ignore
+            removal_list=all_opts.ignore,
+            volterra_columns=all_opts.volterra_columns
         ),
         name="make_run_designs_node"
     )
@@ -668,6 +669,7 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
 
             run_level_wf = build_run_workflow(run=run,
                                               task=task,
+                                              func_space=func_space,
                                               file_extension=file_extension)
             # Connect the files to the run-level workflow
             workflow.connect([
@@ -955,7 +957,7 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
     workflow.connect([
         (regression_wf, reporting_wf, [
             ("outputnode.design_matrix", "inputnode.design_matrix"),
-            ("outputnode.tmask_file", "inputnode.ses_tmask_file"),
+            ("outputnode.tmask_file", "inputnode.final_tmask_file"),
             ("outputnode.execute", "inputnode.execute")
         ]),
         (input_merging_node, reporting_wf, [
@@ -1056,7 +1058,7 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
     return workflow
 
 
-def build_run_workflow(run, task: str, file_extension: str):
+def build_run_workflow(run, task: str, func_space:str, file_extension: str):
 
     ### Define the workflow and the inputnode ###
     wf_name = f"task_{task}_run_{run}_processsing_wf"
@@ -1181,6 +1183,30 @@ def build_run_workflow(run, task: str, file_extension: str):
             need_intercept=all_opts.exclude_run_mean
         )
 
+        reporting_wf = build_reporting_workflow(
+            task=task,
+            run=run
+        )
+
+        run_design_ds = Node(
+            FLADataSink(
+                base_directory=all_opts.datasink_path.parent,
+                out_path_base=all_opts.datasink_path.name,
+                extra_bids_patterns=all_opts.bids_patterns,
+                dismiss_entities=["den"],
+                desc="nuisance",
+                space=func_space,
+                suffix="design",
+                task=task,
+            ),
+            name=f"task_{task}_run_{run}_design_ds"
+        )
+
+        run_design_merging_node = Node(
+            MergeUnique(),
+            name=f"task_{task}_run_{run}_merge_design_files_node"
+        )
+
         workflow.connect([
             (last_func_node, regression_wf, [
                 ("bold_file", "inputnode.bold_files")
@@ -1190,6 +1216,26 @@ def build_run_workflow(run, task: str, file_extension: str):
                 ("tmask_file", "inputnode.tmask_files"),
                 ("include", "inputnode.execute")
             ]),
+            (regression_wf, reporting_wf, [
+                ("outputnode.design_matrix", "inputnode.design_matrix"),
+                ("outputnode.tmask_file", "inputnode.final_tmask_file"),
+                ("outputnode.execute", "inputnode.execute")
+            ]),
+            (regression_wf, run_design_merging_node, [
+                ("outputnode.design_matrix", "design_x1"),
+            ]),
+            (reporting_wf, run_design_merging_node, [
+                ("outputnode.design_plot", "design_x2"),
+            ]),
+            (run_design_merging_node, run_design_ds, [
+                ("design", "in_file")
+            ]),
+            (regression_wf, run_design_ds, [
+                ("outputnode.execute", "execute"),
+            ]),
+            (inputnode, run_design_ds, [
+                ("bold_file", "source_file")
+            ])
         ])
         last_func_node = regression_wf.get_node("outputnode")
 
@@ -1645,21 +1691,25 @@ def build_smoothing_wf(run, task: str, file_extension: str):
     return workflow
 
 
-def build_reporting_workflow(task:str):
-    
-    workflow = Workflow(name=f"task_{task}_reporting_wf")
+def build_reporting_workflow(task:str, run:str=None):
+
+    wf_label = f"task_{task}"
+    if run:
+        wf_label += f"_run_{run}"
+    workflow = Workflow(name=f"{wf_label}_reporting_wf")
 
     inputnode = Node(
         IdentityInterface(
             fields=[
                 "design_matrix",
-                "ses_tmask_file",
+                "final_tmask_file",
                 "execute",
                 "run_tmask_files",
                 "confounds_files",
                 "inclusion_list",
                 "exclusion_tables"
-            ]
+            ],
+            mandatory_inputs=False
         ),
         name="inputnode"
     )
@@ -1671,7 +1721,8 @@ def build_reporting_workflow(task:str):
                 "design_plot",
                 "design_correlations",
                 "exclusion_report"
-            ]
+            ],
+            mandatory_inputs=False
         ),
         name="outputnode"
     )
@@ -1679,13 +1730,6 @@ def build_reporting_workflow(task:str):
     plot_design_node = Node(
         PlotDesign(),
         name="plot_design_node"
-    )
-
-    report_exclusions_node = Node(
-        ReportExclusions(
-            task=task
-        ),
-        name="report_exclusions_node"
     )
 
     workflow.connect([
@@ -1696,18 +1740,28 @@ def build_reporting_workflow(task:str):
         (plot_design_node, outputnode, [
             ("design_plot", "design_plot"),
             ("design_correlations", "design_correlations")
-        ]),
-        (inputnode, report_exclusions_node, [
-            ("exclusion_tables", "exclusion_tables"),
-            ("run_tmask_files", "tmask_files"),
-            ("confounds_files", "confounds_files"),
-            ("inclusion_list", "inclusion_list"),
-            ("ses_tmask_file", "ses_tmask_file")
-        ]), 
-        (report_exclusions_node, outputnode, [
-            ("exclusion_report", "exclusion_report")
         ])
     ])
+
+    if run is None:
+        report_exclusions_node = Node(
+            ReportExclusions(
+                task=task
+            ),
+            name="report_exclusions_node"
+        )
+        workflow.connect([
+            (inputnode, report_exclusions_node, [
+                ("exclusion_tables", "exclusion_tables"),
+                ("run_tmask_files", "tmask_files"),
+                ("confounds_files", "confounds_files"),
+                ("inclusion_list", "inclusion_list"),
+                ("ses_tmask_file", "ses_tmask_file")
+            ]), 
+            (report_exclusions_node, outputnode, [
+                ("exclusion_report", "exclusion_report")
+            ])
+        ])
 
     return workflow
 
