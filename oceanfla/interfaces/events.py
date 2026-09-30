@@ -1,3 +1,5 @@
+from re import S
+
 from nipype.interfaces.base import (
     SimpleInterface,
     BaseInterfaceInputSpec,
@@ -225,10 +227,11 @@ def make_design_matrix(event_file: str | Path,
             custom_hrf=(hrf if isinstance(hrf, str) else None)
         )
         for cv in selected_continuous_vars.columns.to_list():
-            if cv in unmodeled:
-                events_matrix[cv] = selected_continuous_vars[cv]
-            else:
+            if cv in convolved_continuous_vars.columns:
                 events_matrix[cv] = convolved_continuous_vars[cv]
+            else:
+                events_matrix[cv] = selected_continuous_vars[cv]
+                
 
     if len(residual_conditions) > 0:
         logger.warning(dedent(f"""The following trial types were not selected under either of the specified models

@@ -500,21 +500,21 @@ def build_ses_design_wf(run, task):
 
     ### Save these other run-level files out if requested ###
     if all_opts.save_intermediates:
-        event_matrix_ds = Node(FLADataSink(
+        main_design_ds = Node(FLADataSink(
             base_directory=all_opts.datasink_path.parent,
             out_path_base=all_opts.datasink_path.name,
             extra_bids_patterns=all_opts.bids_patterns,
-            desc="modeled",
-            suffix="events"
+            desc="event",
+            suffix="design"
         ),
-            name="event_matrix_ds"
+            name="main_design_ds"
         )
         workflow.connect([
-            (inputnode, event_matrix_ds, [
+            (inputnode, main_design_ds, [
                 ("events_file", "source_file")
             ]),
-            (events_matrix_node, event_matrix_ds, [
-                ("events_matrix", "in_file")
+            (make_run_designs_node, main_design_ds, [
+                ("main_design", "in_file")
             ])
         ])
 
@@ -1218,7 +1218,7 @@ def build_run_workflow(run, task: str, func_space:str, file_extension: str):
             ]),
             (regression_wf, reporting_wf, [
                 ("outputnode.design_matrix", "inputnode.design_matrix"),
-                ("outputnode.tmask_file", "inputnode.final_tmask_file"),
+                # ("outputnode.tmask_file", "inputnode.final_tmask_file"),
                 ("outputnode.execute", "inputnode.execute")
             ]),
             (regression_wf, run_design_merging_node, [
@@ -1756,7 +1756,7 @@ def build_reporting_workflow(task:str, run:str=None):
                 ("run_tmask_files", "tmask_files"),
                 ("confounds_files", "confounds_files"),
                 ("inclusion_list", "inclusion_list"),
-                ("ses_tmask_file", "ses_tmask_file")
+                ("final_tmask_file", "ses_tmask_file")
             ]), 
             (report_exclusions_node, outputnode, [
                 ("exclusion_report", "exclusion_report")

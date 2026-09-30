@@ -572,10 +572,8 @@ def make_run_design_files(event_matrix: str,
 
     if removal_list:
         clean_removal_list = [c for c in removal_list if c in combo_df.columns]
-        volterra_columns_to_remove = []
         for c in clean_removal_list:
-            volterra_columns_to_remove.extend(get_volterra_columns(c, all_design_columns))
-        clean_removal_list.extend(volterra_columns_to_remove)
+            clean_removal_list.extend(get_volterra_columns(c, all_design_columns))
         if len(clean_removal_list) > 0:
             log_msg = f"removing the following columns <{clean_removal_list}> from design matrices: \n\t<{event_matrix}>"
             if nuisance_matrix: log_msg += f"\n\t<{nuisance_matrix}>"
@@ -590,8 +588,9 @@ def make_run_design_files(event_matrix: str,
 
     all_nuisance_regressors = []
     for nr in nuisance_regressors:
-        all_nuisance_regressors.extend(get_volterra_columns(nr, all_design_columns))
-    all_nuisance_regressors.extend(nuisance_regressors)
+        if (not removal_list) or (nr not in removal_list):
+            all_nuisance_regressors.append(nr)
+            all_nuisance_regressors.extend(get_volterra_columns(nr, all_design_columns))
     nuisance_regressors_to_grab = [nr for nr in all_nuisance_regressors if nr in all_design_columns]
     nuisance_regressors_ignored = [nr for nr in all_nuisance_regressors if nr not in all_design_columns]
     if len(nuisance_regressors_ignored) > 0:
