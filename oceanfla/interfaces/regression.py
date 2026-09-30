@@ -477,7 +477,7 @@ class MakeRunDesignInputSpec(BaseInterfaceInputSpec):
         desc="An nuisance matrix file"
     )
     nuisance_regressors = traits.Union(
-        traits.List(trait=traits.Str),
+        traits.List(item_trait=traits.Str),
         None,
         default_value=None,
         desc="A list of column names to be used for nuisance regression."
@@ -488,7 +488,13 @@ class MakeRunDesignInputSpec(BaseInterfaceInputSpec):
         ),
         None,
         default_value=None,
-        desc="A list of regressors to remove from all design matrices"
+        desc="A list of regressors to remove from all design matrices."
+    )
+    volterra_columns = traits.Union(
+        traits.List(trait=traits.Str),
+        None,
+        default_value=None,
+        desc="A list of column names to be used for volterra expansion."
     )
 
 
@@ -515,7 +521,8 @@ class MakeRunDesign(SimpleInterface):
             event_matrix=self.inputs.event_matrix,
             nuisance_matrix=self.inputs.nuisance_matrix,
             nuisance_regressors=self.inputs.nuisance_regressors,
-            removal_list=self.inputs.removal_list
+            removal_list=self.inputs.removal_list,
+            volterra_columns=self.inputs.volterra_columns
         )
         return runtime
 
@@ -523,7 +530,8 @@ class MakeRunDesign(SimpleInterface):
 def make_run_design_files(event_matrix: str,
                           nuisance_matrix: str = None,
                           nuisance_regressors: list[str] = None,
-                          removal_list: list[str] = None):
+                          removal_list: list[str] = None,
+                          volterra_columns: list[str] = None):
     import pandas as pd
     import numpy as np
     from oceanfla.utilities import replace_entities
@@ -540,7 +548,17 @@ def make_run_design_files(event_matrix: str,
         event_matrix,
         {"suffix": "nuisance-design", "ext": ".tsv", "path": None}
     )
-    
+
+    def get_volterra_columns(column_name:str, column_list:list[str]):
+        cols = []
+        if column_name in volterra_columns:
+            for col in column_list:
+                if column_name in col:
+                    split_name = col.rsplit("_", 1)
+                    if (len(split_name) == 2) and (split_name[1].isnumeric()) and (split_name[0] == column_name):
+                        cols.append(col)
+        return cols
+
     combo_df = None
     if not nuisance_matrix:
         combo_df = event_df
@@ -549,9 +567,13 @@ def make_run_design_files(event_matrix: str,
         combo_df = pd.concat([event_df.reset_index(drop=True), 
                                 nuisance_df.reset_index(drop=True)], 
                               axis=1)
+        
+    all_design_columns = combo_df.columns.to_list()
 
     if removal_list:
         clean_removal_list = [c for c in removal_list if c in combo_df.columns]
+        for c in clean_removal_list:
+            clean_removal_list.extend(get_volterra_columns(c, all_design_columns))
         if len(clean_removal_list) > 0:
             log_msg = f"removing the following columns <{clean_removal_list}> from design matrices: \n\t<{event_matrix}>"
             if nuisance_matrix: log_msg += f"\n\t<{nuisance_matrix}>"
@@ -563,15 +585,20 @@ def make_run_design_files(event_matrix: str,
         return main_design_file, None
     
     all_design_columns = combo_df.columns.to_list()
-    main_regressors = [
-        dc for dc in all_design_columns if dc not in nuisance_regressors]
+
+    all_nuisance_regressors = []
+    for nr in nuisance_regressors:
+        if (not removal_list) or (nr not in removal_list):
+            all_nuisance_regressors.append(nr)
+            all_nuisance_regressors.extend(get_volterra_columns(nr, all_design_columns))
+    nuisance_regressors_to_grab = [nr for nr in all_nuisance_regressors if nr in all_design_columns]
+    nuisance_regressors_ignored = [nr for nr in all_nuisance_regressors if nr not in all_design_columns]
+    if len(nuisance_regressors_ignored) > 0:
+            logger.warning(f"Some nuisance regressors were not found and will be ignored: {nuisance_regressors_ignored}")
+
+    main_regressors = [dc for dc in all_design_columns if dc not in nuisance_regressors_to_grab]
     if len(main_regressors) < 1:
         raise ValueError("All regressor columns are being used for nuisance regression")
-
-    nuisance_regressors_to_grab = [nr for nr in nuisance_regressors if nr in combo_df.columns]
-    nuisance_regressors_ignored = [nr for nr in nuisance_regressors if nr not in combo_df.columns]
-    if len(nuisance_regressors_ignored) > 0:
-        logger.warning(f"Some nuisance regressors were not found and will be ignored: {nuisance_regressors_ignored}")
 
     nuisance_design = combo_df.loc[:, nuisance_regressors_to_grab]
     main_design = combo_df.loc[:, main_regressors]

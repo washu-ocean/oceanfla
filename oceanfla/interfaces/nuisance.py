@@ -110,8 +110,13 @@ def generate_nuisance_matrix(confounds_file: str,
         nuisance[make_regressor_run_specific("trend", bids_source_file=confounds_file)] = np.arange(0, len(nuisance))
     if volterra_columns and volterra_lag:
         for vc in volterra_columns:
-            for lag in range(volterra_lag):
-                nuisance.loc[:, f"{vc}_{lag + 1}"] = nuisance.loc[:, vc].shift(lag + 1)
+            if vc in nuisance.columns:
+                for lag in range(1, volterra_lag+1):
+                    nuisance.insert(
+                        loc=nuisance.columns.get_loc(vc)+lag, 
+                        column=f"{vc}_{lag}", 
+                        value=nuisance.loc[:, vc].shift(lag),
+                        allow_duplicates=False)
         nuisance.fillna(0, inplace=True)
 
     if len(nuisance.columns.to_list()) == 0:
