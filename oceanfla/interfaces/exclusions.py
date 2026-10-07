@@ -7,6 +7,8 @@ from nipype.interfaces.base import (
     traits,
 )
 
+from oceanfla.interfaces.utility import OptionalInterface, OptionalInterfaceSpec
+
 
 class CheckRunRetentionInputSpec(BaseInterfaceInputSpec):
     tmask_file = File(
@@ -78,8 +80,9 @@ def check_run_retention(tmask_file: Path | str,
                         retention_threshold: float,
                         start_censoring: int):
     import numpy as np
+    import pandas as pd
 
-    tmask_data = np.loadtxt(tmask_file)
+    tmask_data = pd.read_csv(tmask_file, sep="\t")["tmask"].to_numpy()
     total_frames = tmask_data.shape[0]
     tmask_after_censor = tmask_data[start_censoring:]
     non_censored_frames = tmask_after_censor.shape[0]
@@ -148,10 +151,11 @@ def check_run_tsnr(bold_file: str | Path,
                    brain_mask: str = None):
     from oceanfla.utilities import load_data
     import numpy as np
+    import pandas as pd
 
     bold_data = load_data(bold_file, brain_mask)
     if tmask_file:
-        tmask_data = np.loadtxt(tmask_file).astype(bool)
+        tmask_data = pd.read_csv(tmask_file, sep="\t")["tmask"].to_numpy().astype(bool)
         bold_data = bold_data[tmask_data, :]
 
     tsnr_map = np.nanmean(bold_data, axis=0) / np.nanstd(bold_data, axis=0)
@@ -361,3 +365,26 @@ def make_exclusion_table(run: str,
     outfile = str(Path().resolve() / outfile)
     df.to_csv(outfile, index=False)
     return outfile
+
+
+class GetIncludedFilesInputSpec(OptionalInterfaceSpec):
+    included=traits.List(
+        trait=traits.Bool,
+        desc="list of boolean flags indicating inclusion"
+    )
+
+class GetIncludedFiles(OptionalInterface):
+    input_spec = GetIncludedFilesInputSpec
+    output_spec = OptionalInterfaceSpec
+
+    def _list_outputs(self):
+        outputs = dict()
+        for k, v in self.inputs.get().items():
+            if k=="included":
+                continue
+            if not isinstance(v, list):
+                continue
+            if len(v) != len(self.inputs.included):
+                raise RuntimeError(f"Length of input <{k}> is not the same length as input <included>")
+            outputs[k] = [ele for ele, inclusion in zip(v,self.inputs.included) if inclusion]
+        return outputs

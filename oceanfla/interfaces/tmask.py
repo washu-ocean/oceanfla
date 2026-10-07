@@ -285,10 +285,10 @@ def make_tmask_tsv(tmask_file:str, fd_threshold:float|None, execute:bool=True):
     if fd_threshold is None:
         fd_threshold = "nan_"
     tmask_data = np.loadtxt(tmask_file)
-    tmask_df = pd.DataFrame(columns=[f"{str(fd_threshold)}mm_tmask"], data=tmask_data)
+    tmask_df = pd.DataFrame(columns=["tmask"], data=tmask_data)
     out_file = replace_entities(
         file=tmask_file, 
         entities={"ext": ".tsv", "path": None}
     )
-    tmask_df.to_csv(out_file, sep="\t")
+    tmask_df.to_csv(out_file, sep="\t", index=False)
     return out_file

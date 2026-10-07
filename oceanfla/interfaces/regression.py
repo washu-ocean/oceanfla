@@ -153,8 +153,8 @@ def massuni_linGLM(func_file: str,
     func_data = load_data(func_file, brain_mask)
     design_matrix = pd.read_csv(design_matrix_file, sep="\t")
     design_matrix_data = design_matrix.to_numpy()
-    mask = np.loadtxt(tmask_file).astype(bool) if tmask_file else np.full(
-        shape=(func_data.shape[0],), fill_value=True)
+    mask = pd.read_csv(tmask_file, sep="\t")["tmask"].to_numpy().astype(bool) if (
+        tmask_file ) else np.full(shape=(func_data.shape[0],), fill_value=True)
 
     assert design_matrix_data.shape[0] == func_data.shape[
         0], "the design matrix must be the same length as the functional data"
@@ -412,7 +412,8 @@ def combine_regression_data(task: str,
     func_data_list = [load_data(f, brain_mask) for f in func_list]
     design_matrices = [pd.read_csv(
         f, sep="\t") for f in design_matrix_files]
-    tmask_list = [np.loadtxt(f) for f in tmask_files] if tmask_files else None
+    tmask_list = [pd.read_csv(f, sep="\t")["tmask"].to_numpy() 
+                  for f in tmask_files] if tmask_files else None
 
     # concatenate all of the data on the time axis
 
@@ -456,8 +457,10 @@ def combine_regression_data(task: str,
                     f"Grouped functional data and tmasks must all have the same number of timepoints, but don't: {func_data_list[i].shape[0]}, {run_tm.shape[0]}")
         final_tmask = replace_entities(
             file=tmask_files[0], entities=entities_base)
-        np.savetxt(final_tmask,
-                   np.concatenate(tmask_list, axis=0))
+        pd.DataFrame(
+            columns=["tmask"], 
+            data=np.concatenate(tmask_list, axis=0)
+        ).to_csv(final_tmask, index=False)
     res_list.append(final_tmask)
 
     res_list.append(True)

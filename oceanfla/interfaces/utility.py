@@ -1,3 +1,4 @@
+from IPython.conftest import work_path
 from nipype.interfaces.utility.base import MergeInputSpec, _ravel
 from nipype.interfaces.io import IOBase, add_traits
 from nipype.interfaces.base import (
@@ -413,3 +414,70 @@ class FLADataSink(DerivativesDataSink, OptionalInterface):
     def __init__(self, allowed_entities=None, out_path_base=None, extra_bids_patterns=None, **inputs):
         super().__init__(allowed_entities=allowed_entities, out_path_base=out_path_base, **inputs)
         self._file_patterns += tuple(extra_bids_patterns)
+
+
+class BIDSSourceInputSpec(OptionalInterfaceSpec):
+    raw_dataset = traits.Directory(
+        exists=True,
+        desc="The path of the raw BIDS dataset"
+    )
+    preprocessed_dataset = traits.Directory(
+        exists=True,
+        desc="The path of the preprocessed BIDS dataset"
+    )
+    datasink_path = traits.Directory(
+        exists=True,
+        desc="The path of the output BIDS dataset"
+    )
+    work_path = traits.Directory(
+        exists=True,
+        desc="The path to the working directory"
+    )
+
+class BIDSSourceOutputSpec(OptionalInterfaceSpec):
+    sources = traits.List(
+        trait=traits.Str,
+        desc="A list of BIDS URIs for source files"
+    )
+
+class BIDSSource(OptionalInterface):
+    input_spec = BIDSSourceInputSpec
+    output_spec = BIDSSourceOutputSpec
+    _file_prefix = "file_"
+
+    def _run_interface(self, runtime):
+        from pathlib import Path
+        input_files = {k:v for k,v in self.inputs.get().items() if k.startswith(self._file_prefix)}
+        source_list = []
+        bids_prefix_map = {
+            "bids:raw:": Path(self.inputs.raw_dataset),
+            "bids:preprocessed:": Path(self.inputs.preprocessed_dataset),
+            "bids::": Path(self.inputs.datasink_path),
+            "work::": Path(self.inputs.work_path)
+        }
+        for _, f in sorted(input_files.items(), key=lambda x: x[0]):
+            f_list = []
+            if isinstance(f, list):
+                f_list = [Path(file) for file in f if f]
+            elif f:
+                f_list.append(Path(f))
+            if len(f_list) == 0:
+                continue
+            for file in f_list:
+                matching_path = None
+                bids_key = None
+                for key, dataset_path in bids_prefix_map.items():
+                    if file.is_relative_to(dataset_path):
+                        relative_path = file.relative_to(dataset_path)
+                        if (matching_path is None) or (len(relative_path.parts)<len(matching_path.parts)):
+                            matching_path = relative_path
+                            bids_key = key
+                if bids_key is None:
+                    matching_path = str(file.resolve())
+                else:
+                    matching_path = f"{bids_key}{matching_path}"
+                source_list.append(matching_path)
+
+        self._results["sources"] = source_list
+        return runtime
+    

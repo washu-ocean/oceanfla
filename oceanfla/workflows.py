@@ -1,12 +1,13 @@
+from cv2 import merge
 from nipype import Node, Workflow, Function
 from nipype.interfaces.io import BIDSDataGrabber
 from nipype.interfaces.utility import IdentityInterface, Select
 # from niworkflows.utils.bids import collect_participants
 from oceanfla.interfaces.reporting import PlotDesign, ReportExclusions
-from oceanfla.interfaces.utility import FLADataSink, ReadMetadataFile
+from oceanfla.interfaces.utility import BIDSSource, FLADataSink, ReadMetadataFile
 from oceanfla.interfaces.clean import FilterData, PercentChange
 from oceanfla.interfaces.events import EventsMatrix, FindContinuousVars, ModifyEventsFile, get_number_of_volumes
-from oceanfla.interfaces.exclusions import CheckExclusionFile, CheckRunRetention, CheckRuntSNR, MakeRunExclusionTable
+from oceanfla.interfaces.exclusions import CheckExclusionFile, CheckRunRetention, CheckRuntSNR, GetIncludedFiles, MakeRunExclusionTable
 from oceanfla.interfaces.nuisance import GenerateNuisanceMatrix
 from oceanfla.interfaces.regression import CombineFIRBetas, ConcatRegressionData, MakeRunDesign, RunGLMRegression
 from oceanfla.interfaces.tmask import FindDscans, MakeTmask, RemoveMotionMasking, make_tmask_tsv
@@ -220,7 +221,8 @@ def build_session_wf(subject, session=None):
                     ("events", "inputnode.events_file"),
                 ]),
                 (extract_task_run_souce_node, design_merging_node, [
-                    ("confounds", f"confounds_x{merge_index}")
+                    ("confounds", f"confounds_x{merge_index}"),
+                    ("events", f"events_x{merge_index}")
                 ])
             ])
 
@@ -249,7 +251,8 @@ def build_session_wf(subject, session=None):
             ("main_design", "inputnode.main_design_files"),
             ("nuisance_design", "inputnode.nuisance_design_files"),
             ("tmask_file", "inputnode.tmask_files"),
-            ("confounds", "inputnode.confounds_files")
+            ("confounds", "inputnode.confounds_files"),
+            ("events", "inputnode.events_files")
         ])
     ])
 
@@ -300,9 +303,9 @@ def build_ses_design_wf(run, task):
         (inputnode, tmask_node, [
             ("confounds_file", "confounds_file")
         ]),
-        (tmask_node, outputnode, [
-            ("tmask_file", "tmask_file"),
-        ])
+        # (tmask_node, outputnode, [
+        #     ("tmask_file", "tmask_file"),
+        # ])
     ]) 
     
     ### Find Dummy scans if supplied ###
@@ -462,10 +465,6 @@ def build_ses_design_wf(run, task):
         (nuisance_mat_node, make_run_designs_node, [
             ("nuisance_matrix", "nuisance_matrix")
         ]),
-        (make_run_designs_node, outputnode, [
-            ("main_design", "main_design"),
-            ("nuisance_design", "nuisance_design")
-        ])
     ])
 
     ### save out the run-level tmask files
@@ -478,15 +477,32 @@ def build_ses_design_wf(run, task):
         name="make_tmask_tsv_node"
     )
     make_tmask_tsv_node.inputs.fd_threshold = all_opts.fd_threshold
-    tmask_ds = Node(FLADataSink(
-        base_directory=all_opts.datasink_path.parent,
-        out_path_base=all_opts.datasink_path.name,
-        extra_bids_patterns=all_opts.bids_patterns,
-        suffix="tmask"
-    ),
+    tmask_ds = Node(
+        FLADataSink(
+            base_directory=all_opts.datasink_path.parent,
+            out_path_base=all_opts.datasink_path.name,
+            extra_bids_patterns=all_opts.bids_patterns,
+            suffix="tmask",
+            Framewise_Displacement_Threshold=f"{all_opts.fd_threshold}mm",
+        ),  
         name="tmask_ds"
     )
+    tmask_sources_node = Node(
+        BIDSSource(
+            raw_dataset=all_opts.raw_bids,
+            preprocessed_dataset=all_opts.preproc_bids,
+            datasink_path=all_opts.datasink_path,
+            work_path=all_opts.work
+        ),
+        name="tmask_sources_node"
+    )
     workflow.connect([
+        (inputnode, tmask_sources_node, [
+            ("confounds_file", "file_1")
+        ]),
+        (tmask_sources_node, tmask_ds,[
+            ("sources", "Sources")
+        ]),
         (tmask_node, make_tmask_tsv_node, [
             ("tmask_file", "tmask_file")
         ]),
@@ -495,6 +511,9 @@ def build_ses_design_wf(run, task):
         ]),
         (make_tmask_tsv_node, tmask_ds, [
             ("tmask_tsv", "in_file")
+        ]),
+        (tmask_ds, outputnode, [
+            ("out_file", "tmask_file")
         ])
     ])
 
@@ -509,12 +528,31 @@ def build_ses_design_wf(run, task):
         ),
             name="main_design_ds"
         )
+        design_sources_node = Node(
+            BIDSSource(
+                raw_dataset=all_opts.raw_bids,
+                preprocessed_dataset=all_opts.preproc_bids,
+                datasink_path=all_opts.datasink_path,
+                work_path=all_opts.work
+            ),
+            name="main_design_sources_node"
+        )
         workflow.connect([
+            (inputnode, design_sources_node, [
+                ("events_file", "file_1"),
+                ("confounds_file", "file_2")
+            ]),
+            (design_sources_node, main_design_ds, [
+                ("sources", "Sources")
+            ]),
             (inputnode, main_design_ds, [
                 ("events_file", "source_file")
             ]),
             (make_run_designs_node, main_design_ds, [
                 ("main_design", "in_file")
+            ]),
+            (main_design_ds, outputnode, [
+                ("out_file", "main_design")
             ])
         ])
 
@@ -529,13 +567,32 @@ def build_ses_design_wf(run, task):
                 name="nuisance_design_ds"
             )
             workflow.connect([
+                (design_sources_node, nuisance_design_ds, [
+                    ("sources", "Sources")
+                ]),
                 (inputnode, nuisance_design_ds, [
                     ("confounds_file", "source_file")
                 ]),
                 (make_run_designs_node, nuisance_design_ds, [
                     ("nuisance_design", "in_file")
+                ]),
+                (nuisance_design_ds, outputnode, [
+                    ("out_file", "nuisance_design")
                 ])
             ])
+        else:
+            workflow.connect([
+                (make_run_designs_node, outputnode, [
+                    ("nuisance_design", "nuisance_design")
+                ])
+            ])
+    else:
+        workflow.connect([
+            (make_run_designs_node, outputnode, [
+                ("main_design", "main_design"),
+                ("nuisance_design", "nuisance_design")
+            ])
+        ])
     
     return workflow
 
@@ -555,7 +612,8 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
                 "main_design_files",
                 "tmask_files",
                 "nuisance_design_files",
-                "confounds_files"
+                "confounds_files",
+                "events_files"
             ]
         ),
         name="inputnode"
@@ -646,7 +704,8 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
                     ("main_design_files", "main_design"),
                     ("nuisance_design_files", "nuisance_design"),
                     ("tmask_files", "tmask_file"),
-                    ("confounds_files", "confounds")
+                    ("confounds_files", "confounds"),
+                    ("events_files", "events")
                 ])
             ])
 
@@ -707,7 +766,8 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
                 (extract_task_run_design_node, input_merging_node, [
                     ("tmask_file", f"tmask_file_x{input_num}"),
                     ("main_design", f"design_matrix_x{input_num}"),
-                    ("confounds", f"confounds_x{input_num}")
+                    ("confounds", f"confounds_x{input_num}"),
+                    ("events", f"events_x{input_num}")
                 ]),
                 (run_exclusion_wf, input_merging_node, [
                     ("outputnode.include", f"include_x{input_num}"),
@@ -734,6 +794,19 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
         ])
     ])
 
+    find_included_sources_node = Node(
+        GetIncludedFiles(),
+        name="find_included_sources_node"
+    )
+    workflow.connect([
+        (input_merging_node, find_included_sources_node, [
+            ("include", "included"),
+            ("tmask_file", "tmask_files"),
+            ("design_matrix", "design_matrices"),
+            ("confounds", "confounds"),
+            ("events", "events")
+        ])
+    ])
 
     ### Datasink for user outputs ###
     bold_runs_list = [bf for bold_list in run_map.values() for bf in bold_list]
@@ -1080,6 +1153,20 @@ def build_run_workflow(run, task: str, func_space:str, file_extension: str):
         name="inputnode"
     )
 
+    input_func_source_node = Node(
+        IdentityInterface(
+            fields=[
+                "out_file"
+            ]
+        ),
+        name="input_func_source_node"
+    )
+    workflow.connect([
+        (inputnode, input_func_source_node, [
+            ("bold_file", "out_file")
+        ])
+    ])
+
     outputnode = Node(
         IdentityInterface(
             fields=[
@@ -1090,6 +1177,7 @@ def build_run_workflow(run, task: str, func_space:str, file_extension: str):
     )
     compress_files = file_extension.endswith(".gz")
     last_func_node = inputnode
+    last_func_source_node = input_func_source_node
 
     ### Smooth the data if requested ###
     if all_opts.fwhm:
@@ -1118,12 +1206,30 @@ def build_run_workflow(run, task: str, func_space:str, file_extension: str):
                 compress=compress_files,
                 dismiss_entities=["den"],
                 desc="smooth",
-                allowed_entities=("fwhm"),
-                fwhm=str(all_opts.fwhm).replace(".", "p")
+                fwhm=f"{all_opts.fwhm:.2f} mm"
             ),
                 name="smoothed_bold_ds"
             )
+            smoothed_sources_node = Node(
+                BIDSSource(
+                    raw_dataset=all_opts.raw_bids,
+                    preprocessed_dataset=all_opts.preproc_bids,
+                    datasink_path=all_opts.datasink_path,
+                    work_path=all_opts.work
+                ),
+                name="smoothed_bold_sources_node"
+            )
             workflow.connect([
+                (last_func_source_node, smoothed_sources_node, [
+                    ("out_file", "file_1")
+                ])
+                (inputnode, smoothed_sources_node, [
+                    ("lh_surf", "file_2"),
+                    ("rh_surf", "file_3")
+                ]),
+                (smoothed_sources_node, smoothed_ds, [
+                    ("sources", "Sources")
+                ]),
                 (smoothing_wf, smoothed_ds, [
                     ("outputnode.bold_file", "in_file"),
                 ]),
@@ -1132,6 +1238,7 @@ def build_run_workflow(run, task: str, func_space:str, file_extension: str):
                     ("include", "execute")
                 ])
             ])
+            last_func_source_node = smoothed_ds
 
     ### Percent signal change ###
     if all_opts.percent_change:
@@ -1164,7 +1271,25 @@ def build_run_workflow(run, task: str, func_space:str, file_extension: str):
             ),
                 name="percent_change_bold_ds"
             )
+            percent_change_sources_node = Node(
+                BIDSSource(
+                    raw_dataset=all_opts.raw_bids,
+                    preprocessed_dataset=all_opts.preproc_bids,
+                    datasink_path=all_opts.datasink_path,
+                    work_path=all_opts.work
+                ),
+                name="percent_change_sources_node"
+            )
             workflow.connect([
+                (last_func_source_node, percent_change_sources_node, [
+                    ("out_file", "file_1")
+                ]),
+                (inputnode, percent_change_sources_node, [
+                    ("tmask_file", "file_2")
+                ]),
+                (percent_change_sources_node, percent_change_ds, [
+                    ("sources", "Sources")
+                ]),
                 (percent_change_node, percent_change_ds, [
                     ("bold_file", "in_file")
                 ]),
@@ -1173,6 +1298,7 @@ def build_run_workflow(run, task: str, func_space:str, file_extension: str):
                     ("include", "execute")
                 ])
             ])
+            last_func_source_node = percent_change_ds
 
     ### Nuisance regression ###
     if all_opts.nuisance_regression:
@@ -1250,7 +1376,26 @@ def build_run_workflow(run, task: str, func_space:str, file_extension: str):
             ),
                 name="regressed_bold_ds"
             )
+            nuisance_regressed_sources_node = Node(
+                BIDSSource(
+                    raw_dataset=all_opts.raw_bids,
+                    preprocessed_dataset=all_opts.preproc_bids,
+                    datasink_path=all_opts.datasink_path,
+                    work_path=all_opts.work
+                ),
+                name="nuisance_regressed_sources_node"
+            )
             workflow.connect([
+                (last_func_source_node, nuisance_regressed_sources_node, [
+                    ("out_file", "file_1")
+                ]),
+                (inputnode, nuisance_regressed_sources_node, [
+                    ("nuisance_design", "file_2"),
+                    ("tmask_file", "file_2")
+                ]),
+                (nuisance_regressed_sources_node, regressed_bold_ds, [
+                    ("sources", "Sources")
+                ]),
                 (regression_wf, regressed_bold_ds, [
                     ("outputnode.bold_file", "in_file")
                 ]),
@@ -1274,6 +1419,9 @@ def build_run_workflow(run, task: str, func_space:str, file_extension: str):
                 name="nuisance_betas_ds"
             )
             workflow.connect([
+                (nuisance_regressed_sources_node, nuisance_betas_ds, [
+                    ("sources", "Sources")
+                ]),
                 (regression_wf, nuisance_betas_ds, [
                     ("outputnode.beta_files", "in_file"),
                     ("outputnode.beta_labels", "condition")
@@ -1283,6 +1431,7 @@ def build_run_workflow(run, task: str, func_space:str, file_extension: str):
                     ("include", "execute")
                 ])
             ])
+            last_func_source_node = regressed_bold_ds
 
     ### Bandpass filter ###
     if all_opts.highpass or all_opts.lowpass:
@@ -1327,6 +1476,7 @@ def build_run_workflow(run, task: str, func_space:str, file_extension: str):
                     ("RepetitionTime", "tr")
                 ])
             ])
+        last_func_node = filter_node
 
         if all_opts.save_intermediates:
             filter_ds = Node(FLADataSink(
@@ -1334,18 +1484,35 @@ def build_run_workflow(run, task: str, func_space:str, file_extension: str):
                 out_path_base=all_opts.datasink_path.name,
                 extra_bids_patterns=all_opts.bids_patterns,
                 compress=compress_files,
-                allowed_entites=("hp", "lp"),
                 dismiss_entities=["den"],
                 desc="filtered",
             ),
                 name="filtered_bold_ds"
             )
+            filtered_sources_node = Node(
+                BIDSSource(
+                    raw_dataset=all_opts.raw_bids,
+                    preprocessed_dataset=all_opts.preproc_bids,
+                    datasink_path=all_opts.datasink_path,
+                    work_path=all_opts.work
+                ),
+                name="filtered_sources_node"
+            )
             if all_opts.highpass:
-                filter_ds.inputs.hp = str(all_opts.highpass).replace(".", "p")
+                filter_ds.inputs.Highpass = f"{all_opts.highpass:.3f} Hz"
             if all_opts.lowpass:
-                filter_ds.inputs.lp = str(all_opts.lowpass).replace(".", "p")
+                filter_ds.inputs.Lowpass = f"{all_opts.lowpass:.3f} Hz"
 
             workflow.connect([
+                (last_func_source_node, filtered_sources_node, [
+                    ("out_file", "file_1"),
+                ]),
+                (inputnode, filtered_sources_node, [
+                    ("tmask_file", "file_2")
+                ]),
+                (filtered_sources_node, filter_ds, [
+                    ("sources", "Sources")
+                ]),
                 (filter_node, filter_ds, [
                     ("bold_file", "in_file")
                 ]),
@@ -1354,14 +1521,21 @@ def build_run_workflow(run, task: str, func_space:str, file_extension: str):
                     ("include", "execute")
                 ])
             ])
-        last_func_node = filter_node
+            last_func_source_node = filter_ds
 
     ### Connect final bold output ###
-    workflow.connect([
-        (last_func_node, outputnode, [
-            ("bold_file", "bold_file")
+    if all_opts.save_intermediates:
+        workflow.connect([
+            (last_func_source_node, outputnode, [
+                ("out_file", "bold_file")
+            ])
         ])
-    ])
+    else:
+        workflow.connect([
+            (last_func_node, outputnode, [
+                ("bold_file", "bold_file")
+            ])
+        ])
 
     return workflow
 
