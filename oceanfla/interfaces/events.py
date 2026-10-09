@@ -159,15 +159,15 @@ def make_design_matrix(event_file: str | Path,
         residual_conditions = [
             c for c in residual_conditions if c not in fir_conditions]
 
-        col_names = {c: c + "-00" for c in fir_conditions}
+        col_names = {c: c + "-f00" for c in fir_conditions}
         events_matrix = events_matrix.rename(columns=col_names)
         fir_cols_to_add = dict()
         for c in fir_conditions:
             for i in range(1, fir):
-                fir_cols_to_add[f"{c}-{i:02d}"] = np.array(
+                fir_cols_to_add[f"{c}-f{i:02d}"] = np.array(
                     np.roll(events_matrix.loc[:, col_names[c]], shift=i, axis=0))
                 # so events do not roll back around to the beginnin
-                fir_cols_to_add[f"{c}-{i:02d}"][:i] = 0
+                fir_cols_to_add[f"{c}-f{i:02d}"][:i] = 0
         events_matrix = pd.concat([events_matrix, pd.DataFrame(
             fir_cols_to_add, index=events_matrix.index)], axis=1)
         events_matrix = events_matrix.astype(int)
@@ -443,11 +443,23 @@ def create_hrf(time, time_to_peak=5, undershoot_dur=12):
     return hrf_timeseries
 
 
-def get_number_of_volumes(bold_in, brain_mask=None):
-    from oceanfla.utilities import load_data
-    func_data = load_data(func_file=bold_in,
-                          brain_mask=brain_mask)
-    return func_data.shape[0]
+def get_number_of_volumes(bold_in):
+    from oceanfla.utilities import is_cifti_file, is_nifti_file
+    import nibabel as nib
+    import bids
+
+    if isinstance(bold_in, bids.layout.BIDSFile):
+        bold_in = str(bold_in.path)
+    img = nib.load(bold_in)
+    if is_cifti_file(bold_in):
+        return img.shape[0]
+    elif is_nifti_file(bold_in):
+        if len(img.shape) == 4:
+            return img.shape[3]
+        else:
+            return 1
+    else:
+        raise ValueError(f"Unsupported file type: {bold_in}")
 
 
 GetVolumeCount = Function(

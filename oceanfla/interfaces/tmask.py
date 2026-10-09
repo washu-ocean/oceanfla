@@ -173,7 +173,7 @@ def find_dscans_file(dscans_dir:str,
     for match_ent in match_entities:
         if match_ent not in source_entities:
             raise RuntimeError(f"Cannot find the needed entities from the source file while looking for dscans files: {match_entities}")
-    match_entities.append("echo")
+    # match_entities.append("echo")
     match_entities.append("run")
 
     # search the dscans directory for possible matches

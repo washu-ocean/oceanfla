@@ -4,6 +4,7 @@ from nipype.interfaces.base import (
     TraitedSpec,
     traits,
 )
+from sqlalchemy import column
 from oceanfla.interfaces.utility import ( 
     OptionalInterface, 
     OptionalInterfaceSpec,
@@ -141,7 +142,7 @@ def massuni_linGLM(func_file: str,
     mask: npt.ArrayLike
         Numpy array representing a mask to apply to the two other parameters
     """
-    from oceanfla.utilities import load_data, create_image_like, replace_entities, is_cifti_file
+    from oceanfla.utilities import load_data, create_image_like, replace_entities, is_cifti_file, make_camel_case
     import pandas as pd
     import numpy as np
     from sklearn.preprocessing import StandardScaler
@@ -193,10 +194,10 @@ def massuni_linGLM(func_file: str,
     pval_files = []
     old_ext = parse_file_entities(func_file)["extension"]
     for i, beta_label in enumerate(design_matrix.columns):
-        beta_label = beta_label.replace("_", "-")
+        beta_label = make_camel_case(beta_label)
         beta_entities = entities_base | {"suffix": f"beta-{beta_label}_boldmap"}
-        t_stat_entities = entities_base | {"suffix": f"beta-{beta_label}-wald-t_boldmap"}
-        student_p_entities = entities_base | {"suffix": f"beta-{beta_label}-2side-p_boldmap"}
+        t_stat_entities = entities_base | {"suffix": f"beta-{beta_label}_stat-T_boldmap"}
+        student_p_entities = entities_base | {"suffix": f"beta-{beta_label}-stat-2SideP_boldmap"}
         
         wald_t_stats = regression_results.t(i)
         student_p_two_sided = 2 * (1 - t.cdf(np.abs(wald_t_stats), regression_results.df_residuals))
@@ -214,7 +215,7 @@ def massuni_linGLM(func_file: str,
             data=(regression_results.theta[i])[np.newaxis, :],
             source_header=func_file,
             out_file=beta_filename,
-            scalar_axis=[f"{beta_label}_beta"],
+            scalar_axis=[f"{beta_label}"],
             brain_mask=brain_mask
         )
         beta_files.append(beta_filename)
@@ -241,7 +242,7 @@ def massuni_linGLM(func_file: str,
             data=student_p_two_sided[np.newaxis, :],
             source_header=func_file,
             out_file=pval_filename,
-            scalar_axis=[f"{beta_label}_p-val"],
+            scalar_axis=[f"{beta_label}_2side-p"],
             brain_mask=brain_mask
         )
         pval_files.append(pval_filename)
@@ -557,9 +558,18 @@ def make_run_design_files(event_matrix: str,
         if column_name in volterra_columns:
             for col in column_list:
                 if column_name in col:
-                    split_name = col.rsplit("_", 1)
+                    split_name = col.rsplit("_volterra", 1)
                     if (len(split_name) == 2) and (split_name[1].isnumeric()) and (split_name[0] == column_name):
                         cols.append(col)
+        return cols
+
+    def get_fir_columns(column_name:str, column_list:list[str]):
+        cols = []
+        for col in column_list:
+            if column_name in col:
+                split_name = col.rsplit("_f", 1)
+                if (len(split_name) == 2) and split_name[1].isnumeric() and (split_name[0] == column_name):
+                    cols.append(col)
         return cols
 
     combo_df = None
@@ -577,6 +587,7 @@ def make_run_design_files(event_matrix: str,
         clean_removal_list = [c for c in removal_list if c in combo_df.columns]
         for c in clean_removal_list:
             clean_removal_list.extend(get_volterra_columns(c, all_design_columns))
+            clean_removal_list.extend(get_fir_columns(c, all_design_columns))
         if len(clean_removal_list) > 0:
             log_msg = f"removing the following columns <{clean_removal_list}> from design matrices: \n\t<{event_matrix}>"
             if nuisance_matrix: log_msg += f"\n\t<{nuisance_matrix}>"
@@ -593,6 +604,7 @@ def make_run_design_files(event_matrix: str,
     for nr in nuisance_regressors:
         if (not removal_list) or (nr not in removal_list):
             all_nuisance_regressors.append(nr)
+            all_nuisance_regressors.extend(get_fir_columns(nr, all_design_columns))
             all_nuisance_regressors.extend(get_volterra_columns(nr, all_design_columns))
     nuisance_regressors_to_grab = [nr for nr in all_nuisance_regressors if nr in all_design_columns]
     nuisance_regressors_ignored = [nr for nr in all_nuisance_regressors if nr not in all_design_columns]
@@ -623,6 +635,38 @@ class CombineFIRBetasInputSpec(OptionalInterfaceSpec):
         trait=traits.Str,
         desc=""
     )
+    fir_count = traits.Union(
+        None,
+        traits.Int(),
+        default_value=None,
+        usedefault=True,
+        desc="The number of fir frames/files to expect"
+    )
+    volterra_count = traits.Union(
+        None,
+        traits.Int(),
+        default_value=None,
+        usedefault=True,
+        desc="The number of volterra columns to expect"
+    )
+    tstat_files = traits.Union(
+        None,
+        traits.List(
+            trait=traits.File(exists=True)
+        ),
+        default_value=None,
+        usedefault=True,
+        desc="List of t-stat files corresponding to each beta file"
+    )
+    pval_files = traits.Union(
+        None,
+        traits.List(
+            trait=traits.File(exists=True)
+        ),
+        default_value=None,
+        usedefault=True,
+        desc="List of p-value files corresponding to each beta file"
+    )
     brain_mask = traits.Union(
         traits.File(exists=True),
         None,
@@ -641,6 +685,24 @@ class CombineFIRBetasOutputSpec(OptionalInterfaceSpec):
         trait=traits.Str,
         desc=""
     )
+    tstat_files = traits.Union(
+        None,
+        traits.List(
+            trait=traits.File(exists=True)
+        ),
+        default_value=None,
+        usedefault=True,
+        desc="List of t-stat files corresponding to each beta file"
+    )
+    pval_files = traits.Union(
+        None,
+        traits.List(
+            trait=traits.File(exists=True)
+        ),
+        default_value=None,
+        usedefault=True,
+        desc="List of p-value files corresponding to each beta file"
+    )
 
 
 class CombineFIRBetas(OptionalInterface):
@@ -649,59 +711,116 @@ class CombineFIRBetas(OptionalInterface):
 
     def _run_interface(self, runtime):
 
-        self._results["beta_files"], self._results["beta_labels"] = combine_fir_betas(
+        res = combine_fir_betas(
             beta_files=self.inputs.beta_files,
             beta_labels=self.inputs.beta_labels,
+            fir_count=self.inputs.fir_count,
+            volterra_count=self.inputs.volterra_count,
+            tstat_files=self.inputs.tstat_files,
+            pval_files=self.inputs.pval_files,
             brain_mask=self.inputs.brain_mask
         )
-
+        self._results["beta_labels"] = res[0] 
+        self._results["beta_files"] = res[1]
+        self._results["tstat_files"] = res[2]
+        self._results["pval_files"] = res[3]
+        
         return runtime
     
 
 def combine_fir_betas(beta_files: list[str],
                       beta_labels: list[str],
+                      fir_count: int = None,
+                      volterra_count: int = None,
+                      tstat_files: list[str] = None,
+                      pval_files: list[str] = None,
                       brain_mask: str = None):
     import numpy as np
     from oceanfla.utilities import replace_entities, load_data, create_image_like, is_cifti_file
     from bids.layout import parse_file_entities
+
+    if (fir_count is None) and (volterra_count is None):
+        return beta_labels, beta_files, tstat_files, pval_files
     
     label_file_map = {blabel: beta_files[i] for i, blabel in enumerate(beta_labels)}
-    
+    tstat_file_map = {blabel: tstat_files[i] for i, blabel in enumerate(beta_labels)} if tstat_files else None
+    pval_file_map = {blabel: pval_files[i] for i, blabel in enumerate(beta_labels)} if pval_files else None
+
+    # find all labels that belong to an FIR modeled condition
     combo_label_file_map = {}
     for blabel in beta_labels:
-        blabel_split = blabel.rsplit("-",1)
-        if len(blabel_split) != 2:
-            continue
-        condition, fir_num = blabel_split[0], blabel_split[1]
-        if fir_num.isnumeric() and len(fir_num)==2:
+        condition = None
+        # check volterra
+        if "Volterra" in blabel:
+            bsplit = blabel.split("Volterra")
+            if len(bsplit)==2 and len(bsplit[1])==2 and bsplit[1].isnumeric():
+                condition = bsplit[0]+"Volterra"
+        # check FIR
+        elif "F" in blabel:
+            bsplit = blabel.rsplit("F",1) 
+            if len(bsplit)==2 and len(bsplit[1])==2 and bsplit[1].isnumeric():
+                condition = bsplit[0]
+
+        if condition is not None:
             if condition in combo_label_file_map:
                 combo_label_file_map[condition].append(blabel)
             else:
                 combo_label_file_map[condition] = [blabel]
+                
 
-    
+    # create the final lists that will hold combined FIR conditions and non-FIR conditions
     combo_beta_files, combo_beta_labels = [], []
+    combo_tstat_files = [] if tstat_file_map else None
+    combo_pval_files = [] if pval_file_map else None
 
+    file_map_list = [
+        (label_file_map, combo_beta_files, ""),
+        (tstat_file_map, combo_tstat_files, "_wald-t"),
+        (pval_file_map, combo_pval_files, "_2side-p"),
+    ]
+
+    # make sure each FIR condition list is the correct number of frames, then combine them into a single file
     for condition, label_list in combo_label_file_map.items():
-        sorted_bfiles = [label_file_map[blabel] for blabel in sorted(label_list, key=lambda x: int(x.rsplit("-",1)[-1]))]
-        combined_beta_data = np.array([load_data(bf, brain_mask=brain_mask)[0,:] for bf in sorted_bfiles])
-        new_entities = {"path":None, "beta":condition}
-        if is_cifti_file(sorted_bfiles[0]):
-            old_ext = parse_file_entities(sorted_bfiles[0])["extension"]
-            new_entities["ext"] = old_ext.replace("scalar", "tseries")
-        new_beta_file = replace_entities(
-            file=sorted_bfiles[0],
-            entities=new_entities
-        )
-        # scalar_axis_labels = ["fir-" + blabel.rsplit("-",1)[-1] for blabel in sorted(label_list, key=lambda x: int(x.rsplit("-",1)[-1]))]
-        create_image_like(
-            data=combined_beta_data,
-            out_file=new_beta_file,
-            source_header=sorted_bfiles[0],
-            # scalar_axis=scalar_axis_labels,
-            brain_mask=brain_mask
-        )
-        combo_beta_files.append(new_beta_file)
+        sorted_labels = sorted(label_list, key=lambda x: int(x[-2:]))
+        if fir_count and (len(label_list) == fir_count) and (sorted_labels[0].endswith("F00")):
+            combo_type = "fir"
+        elif volterra_count and (len(label_list) == volterra_count) and ("Volterra" in label_list[0]):
+            combo_type = "volterra"
+        else:
+            continue
+        for file_map, combo_file_list, scalar_desc in file_map_list:
+            if (file_map is None) or (combo_file_list is None):
+                continue
+            sorted_files = [file_map[blabel] for blabel in sorted_labels]
+            combined_data = np.array([load_data(f, brain_mask=brain_mask)[0,:] for f in sorted_files])
+            new_entities = {"path":None, "beta":condition}
+            new_combo_file = replace_entities(
+                file=sorted_files[0],
+                entities=new_entities
+            )
+            scalar_axis_labels = [f"{blabel}{scalar_desc}" for blabel in sorted_labels]
+            create_image_like(
+                data=combined_data,
+                out_file=new_combo_file,
+                source_header=sorted_files[0],
+                scalar_axis=scalar_axis_labels,
+                brain_mask=brain_mask
+            )
+            combo_file_list.append(new_combo_file)
+            for blabel in sorted_labels:
+                del file_map[blabel]
         combo_beta_labels.append(condition)
 
-    return combo_beta_files, combo_beta_labels
+    # Add any left over, non-FIR conditions to the final lists
+    left_over_keys = list(label_file_map.keys())
+    combo_beta_labels.extend(left_over_keys)
+    for file_map, combo_file_list, _ in file_map_list:
+        if (file_map is None) or (combo_file_list is None):
+            continue
+        for k in left_over_keys:
+            if k not in file_map:
+                raise RuntimeError("Each input file list does not contain the same beta labels")
+            combo_file_list.append(file_map[k])
+
+
+    return combo_beta_labels, combo_beta_files, combo_tstat_files, combo_pval_files

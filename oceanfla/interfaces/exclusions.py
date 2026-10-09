@@ -3,9 +3,11 @@ from nipype.interfaces.base import (
     BaseInterfaceInputSpec,
     File,
     SimpleInterface,
+    DynamicTraitedSpec,
     TraitedSpec,
     traits,
 )
+from nipype.interfaces.io import IOBase
 
 from oceanfla.interfaces.utility import OptionalInterface, OptionalInterfaceSpec
 
@@ -367,15 +369,18 @@ def make_exclusion_table(run: str,
     return outfile
 
 
-class GetIncludedFilesInputSpec(OptionalInterfaceSpec):
+class GetIncludedFilesInputSpec(DynamicTraitedSpec):
     included=traits.List(
         trait=traits.Bool,
         desc="list of boolean flags indicating inclusion"
     )
 
-class GetIncludedFiles(OptionalInterface):
+class GetIncludedFiles(IOBase):
     input_spec = GetIncludedFilesInputSpec
-    output_spec = OptionalInterfaceSpec
+    output_spec = DynamicTraitedSpec
+
+    def __init__(self, **inputs):
+        super().__init__(**inputs)
 
     def _list_outputs(self):
         outputs = dict()
@@ -383,6 +388,7 @@ class GetIncludedFiles(OptionalInterface):
             if k=="included":
                 continue
             if not isinstance(v, list):
+                outputs[k] = v
                 continue
             if len(v) != len(self.inputs.included):
                 raise RuntimeError(f"Length of input <{k}> is not the same length as input <included>")

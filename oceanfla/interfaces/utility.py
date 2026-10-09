@@ -15,6 +15,8 @@ from nipype.interfaces.base.support import RuntimeContext, InterfaceResult
 from nipype import config
 from nipype.utils.filemanip import indirectory
 import os
+from pathlib import Path
+from json import dumps
 
 
 def optional_trait(*in_traits, **kwargs):
@@ -415,8 +417,29 @@ class FLADataSink(DerivativesDataSink, OptionalInterface):
         super().__init__(allowed_entities=allowed_entities, out_path_base=out_path_base, **inputs)
         self._file_patterns += tuple(extra_bids_patterns)
 
+    def _run_interface(self, runtime):
+        runtime = super()._run_interface(runtime)
+        # work around to save the same metadata for mulitple out files
+        if len(self._results["out_file"]) > 1:
+            meta_fields = self.inputs.copyable_trait_names()
+            self._metadata.update(
+                {
+                    k: getattr(self.inputs, k)
+                    for k in meta_fields
+                    if k not in self._static_traits
+                }
+            )
+            if self._metadata:
+                self._results["out_meta"] = []
+                for out_file in self._results["out_file"]:
+                    out_file = Path(out_file)
+                    sidecar = out_file.parent / f"{out_file.name.split('.', 1)[0]}.json"
+                    sidecar.write_text(dumps(self._metadata, sort_keys=True, indent=2))
+                    self._results["out_meta"].append(str(sidecar))
+        return runtime
 
-class BIDSSourceInputSpec(OptionalInterfaceSpec):
+
+class BIDSSourceInputSpec(DynamicTraitedSpec):
     raw_dataset = traits.Directory(
         exists=True,
         desc="The path of the raw BIDS dataset"
@@ -433,14 +456,22 @@ class BIDSSourceInputSpec(OptionalInterfaceSpec):
         exists=True,
         desc="The path to the working directory"
     )
+    match_list = traits.Union(
+        None,
+        traits.List(),
+        default_value=None,
+        usedefault=True,
+        desc="A list to match the length of"
+    )
 
-class BIDSSourceOutputSpec(OptionalInterfaceSpec):
-    sources = traits.List(
-        trait=traits.Str,
+class BIDSSourceOutputSpec(DynamicTraitedSpec):
+    sources = traits.Union(
+        traits.List(trait=traits.Str),
+        traits.List(trait=traits.List(trait=traits.Str)),
         desc="A list of BIDS URIs for source files"
     )
 
-class BIDSSource(OptionalInterface):
+class BIDSSource(SimpleInterface):
     input_spec = BIDSSourceInputSpec
     output_spec = BIDSSourceOutputSpec
     _file_prefix = "file_"
@@ -477,7 +508,8 @@ class BIDSSource(OptionalInterface):
                 else:
                     matching_path = f"{bids_key}{matching_path}"
                 source_list.append(matching_path)
-
+        if self.inputs.match_list:
+            source_list = [source_list for _ in range(len(self.inputs.match_list))]
         self._results["sources"] = source_list
         return runtime
     

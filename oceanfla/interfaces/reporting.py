@@ -194,7 +194,7 @@ def make_exclusion_report(task: str,
             raise ValueError(
                 "Session-level GLM was run, but no session-level tmask was provided"
             )
-        ses_level_tmask = np.loadtxt(ses_tmask).astype(bool)
+        ses_level_tmask = pd.read_csv(ses_tmask, sep="\t")["tmask"].to_numpy().astype(bool)
         if ses_level_tmask.shape[0] != total_frame_count:
             raise RuntimeError(
                 f"Length of session tmask and reported frames is different"
