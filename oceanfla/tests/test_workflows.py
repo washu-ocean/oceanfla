@@ -1,4 +1,5 @@
 import pytest
+from types import SimpleNamespace
 from oceanfla import workflows as workflows_module
 
 
@@ -74,4 +75,37 @@ def test_parse_session_bold_files_uses_fixture_layout(bids_layouts):
     assert ("MNI152NLin6Asym" in run_info) and ("MNIInfant" in run_info)
     assert "movie" in run_info["MNI152NLin6Asym"]
     assert len(run_info["MNI152NLin6Asym"]["movie"]) == 2
+
+
+def test_build_run_workflow_uses_filter_output_when_filtering(monkeypatch, opts):
+    cfg = SimpleNamespace(**vars(opts))
+    cfg.nuisance_regression = ["framewise_displacement"]
+    cfg.highpass = 0.01
+    cfg.lowpass = 0.1
+    cfg.save_intermediates = False
+    cfg.brain_mask = str(opts.brain_mask)
+    cfg.filter_padtype = "mean"
+    cfg.filter_padlen = 50
+    cfg.exclude_run_mean = False
+    cfg.datasink_path = opts.preproc_bids
+    cfg.raw_bids = opts.raw_bids
+    cfg.preproc_bids = opts.preproc_bids
+    cfg.work = opts.work
+    cfg.bids_patterns = []
+    cfg.task_rename = "movie"
+    cfg.fwhm = None
+    cfg.percent_change = False
+
+    monkeypatch.setattr(workflows_module, "all_opts", cfg)
+
+    wf = workflows_module.build_run_workflow(
+        run=1,
+        task="movie",
+        func_space="MNI152NLin6Asym",
+        file_extension=".nii.gz",
+    )
+
+    assert wf.get_node("filtering_node") is not None
+    assert wf.get_node("outputnode") is not None
+    assert wf._graph.get_edge_data(wf.get_node("filtering_node"), wf.get_node("outputnode")) is not None
 

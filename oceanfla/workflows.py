@@ -718,39 +718,41 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
             # Connect the files to the run-level workflow
             workflow.connect([
                 (inputnode, run_level_wf, [
-                    ("subject", "inputnode.subject"),
-                    ("session", "inputnode.session"),
+                    ("subject", "main_inputnode.subject"),
+                    ("session", "main_inputnode.session"),
                 ]),
                 (extract_task_run_design_node, run_level_wf, [
-                    ("tmask_file", "inputnode.tmask_file"),
-                    ("nuisance_design", "inputnode.nuisance_design"),
+                    ("tmask_file", "main_inputnode.tmask_file"),
+                    ("nuisance_design", "main_inputnode.nuisance_design"),
                 ]),
                 (bold_run_identity_node, run_level_wf, [
-                    ("bold_file", "inputnode.bold_file"),
-                    ("tr", "inputnode.tr")
+                    ("bold_file", "main_inputnode.bold_file"),
+                    ("tr", "main_inputnode.tr")
                 ]),
                 (run_exclusion_wf, run_level_wf, [
-                    ("outputnode.include", f"inputnode.include")
+                    ("outputnode.include", f"main_inputnode.include")
                 ])
             ])
 
             if is_cifti_file(file_extension) and all_opts.fwhm:
                 workflow.connect([
                     (lh_list_select_node, run_level_wf, [
-                        ("out", "inputnode.lh_surf")
+                        ("out", "main_inputnode.lh_surf")
                     ]),
                     (rh_list_select_node, run_level_wf, [
-                        ("out", "inputnode.rh_surf")
+                        ("out", "main_inputnode.rh_surf")
                     ])
                 ])
 
-            # Connect the output of the run-level workflows to the merging node
+            # Connect the output of the run-level workflows to the merging node.
+            # The merge must consume the workflow's final result node, not the nested
+            # regression workflow output.
             workflow.connect([
                 (bold_run_identity_node, input_merging_node, [
                     ("tr", f"tr_x{input_num}")
                 ]),
                 (run_level_wf, input_merging_node, [
-                    ("outputnode.bold_file", f"bold_file_x{input_num}")
+                    ("final_outputnode.processed_bold", f"bold_file_x{input_num}")
                 ]),
                 (extract_task_run_design_node, input_merging_node, [
                     ("tmask_file", f"tmask_file_x{input_num}"),
@@ -1252,7 +1254,7 @@ def build_run_workflow(run, task: str, func_space:str, file_extension: str):
                 "include"
             ]
         ),
-        name="inputnode"
+        name="main_inputnode"
     )
 
     input_func_source_node = Node(
@@ -1272,10 +1274,10 @@ def build_run_workflow(run, task: str, func_space:str, file_extension: str):
     outputnode = Node(
         IdentityInterface(
             fields=[
-                "bold_file",
+                "processed_bold",
             ]
         ),
-        name="outputnode"
+        name="final_outputnode"
     )
     compress_files = file_extension.endswith(".gz")
     last_func_node = inputnode
@@ -1523,7 +1525,8 @@ def build_run_workflow(run, task: str, func_space:str, file_extension: str):
                 desc="nuisanceRegression",
                 suffix="boldmap",
                 stat="effect",
-                allowed_entities=("condition", "stat")
+                allowed_entities=("condition", "stat"),
+                Test="OLS"
             ),
                 name="nuisance_betas_ds"
             )
@@ -1627,19 +1630,15 @@ def build_run_workflow(run, task: str, func_space:str, file_extension: str):
 
     ### Connect final bold output ###
     if all_opts.save_intermediates:
-        print(f"CONNECTING TO FUNC SOURCE NODE: ")
-        print(last_func_source_node.name)
         workflow.connect([
             (last_func_source_node, outputnode, [
-                ("out_file", "bold_file")
+                ("out_file", "processed_bold")
             ])
         ])
     else:
-        print(f"CONNECTING TO FUNC WORK NODE: ")
-        print(last_func_node.name)
         workflow.connect([
             (last_func_node, outputnode, [
-                ("bold_file", "bold_file")
+                ("bold_file", "processed_bold")
             ])
         ])
 
