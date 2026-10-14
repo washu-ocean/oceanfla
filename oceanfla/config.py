@@ -4,7 +4,6 @@ import json
 import multiprocessing
 import logging
 from logging.handlers import QueueHandler
-from textwrap import dedent
 
 
 class Options():

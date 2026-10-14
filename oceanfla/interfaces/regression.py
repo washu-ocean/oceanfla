@@ -4,7 +4,6 @@ from nipype.interfaces.base import (
     TraitedSpec,
     traits,
 )
-from sqlalchemy import column
 from oceanfla.interfaces.utility import ( 
     OptionalInterface, 
     OptionalInterfaceSpec,

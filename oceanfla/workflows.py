@@ -3,19 +3,18 @@ from nipype.interfaces.io import BIDSDataGrabber
 from nipype.interfaces.utility import IdentityInterface, Select
 # from niworkflows.utils.bids import collect_participants
 from oceanfla.interfaces.reporting import PlotDesign, ReportExclusions
-from oceanfla.interfaces.utility import BIDSSource, FLADataSink, ReadMetadataFile
+from oceanfla.interfaces.utility import BIDSSource, FLADataSink
 from oceanfla.interfaces.clean import FilterData, PercentChange
-from oceanfla.interfaces.events import EventsMatrix, FindContinuousVars, ModifyEventsFile, get_number_of_volumes
+from oceanfla.interfaces.events import EventsMatrix, FindContinuousVars, ModifyEventsFile
 from oceanfla.interfaces.exclusions import CheckExclusionFile, CheckRunRetention, CheckRuntSNR, GetIncludedFiles, MakeRunExclusionTable
 from oceanfla.interfaces.nuisance import GenerateNuisanceMatrix
 from oceanfla.interfaces.regression import CombineFIRBetas, ConcatRegressionData, MakeRunDesign, RunGLMRegression
 from oceanfla.interfaces.tmask import FindDscans, MakeTmask, RemoveMotionMasking, make_tmask_tsv
 from oceanfla.interfaces.utility import MergeUnique, ExtractDataGroup
-from oceanfla.config import all_opts, get_bids_file, get_logger
-from oceanfla.interfaces.workbench_utils import CiftiParcellate, VolumeSmooth, SurfaceSmooth
+from oceanfla.config import all_opts, get_logger
+from oceanfla.interfaces.workbench_utils import VolumeSmooth, SurfaceSmooth
 from oceanfla.utilities import is_cifti_file, is_nifti_file, parse_session_bold_files
 from bids.utils import listify
-from bids.layout import parse_file_entities
 from pathlib import Path
 
 logger = get_logger("nipype.workflow")

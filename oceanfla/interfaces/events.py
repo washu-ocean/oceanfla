@@ -1,5 +1,3 @@
-from re import S
-
 from nipype.interfaces.base import (
     SimpleInterface,
     BaseInterfaceInputSpec,

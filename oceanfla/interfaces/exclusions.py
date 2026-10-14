@@ -9,8 +9,6 @@ from nipype.interfaces.base import (
 )
 from nipype.interfaces.io import IOBase
 
-from oceanfla.interfaces.utility import OptionalInterface, OptionalInterfaceSpec
-
 
 class CheckRunRetentionInputSpec(BaseInterfaceInputSpec):
     tmask_file = File(
