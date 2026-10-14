@@ -230,8 +230,7 @@ def build_session_wf(subject, session=None):
                     ("events", "inputnode.events_file"),
                 ]),
                 (extract_task_run_souce_node, design_merging_node, [
-                    ("confounds", f"confounds_x{merge_index}"),
-                    ("events", f"events_x{merge_index}")
+                    ("confounds", f"confounds_x{merge_index}")
                 ])
             ])
 
@@ -260,8 +259,7 @@ def build_session_wf(subject, session=None):
             ("main_design", "inputnode.main_design_files"),
             ("nuisance_design", "inputnode.nuisance_design_files"),
             ("tmask_file", "inputnode.tmask_files"),
-            ("confounds", "inputnode.confounds_files"),
-            ("events", "inputnode.events_files")
+            ("confounds", "inputnode.confounds_files")
         ])
     ])
 
@@ -334,6 +332,7 @@ def build_ses_design_wf(run, task):
             suffix="tmask",
             FramewiseDisplacementThreshold=f"{all_opts.fd_threshold}mm",
             NonSteadyStateVolumesDiscardedFromStart=all_opts.start_censoring,
+            NeighborMaskingLength=all_opts.minimum_unmasked_neighbors,
             Description="Temporal Mask"
             
         ),  
@@ -593,8 +592,7 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
                 "main_design_files",
                 "tmask_files",
                 "nuisance_design_files",
-                "confounds_files",
-                "events_files"
+                "confounds_files"
             ]
         ),
         name="inputnode"
@@ -689,8 +687,7 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
                     ("main_design_files", "main_design"),
                     ("nuisance_design_files", "nuisance_design"),
                     ("tmask_files", "tmask_file"),
-                    ("confounds_files", "confounds"),
-                    ("events_files", "events")
+                    ("confounds_files", "confounds")
                 ])
             ])
 
@@ -757,8 +754,7 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
                 (extract_task_run_design_node, input_merging_node, [
                     ("tmask_file", f"tmask_file_x{input_num}"),
                     ("main_design", f"design_matrix_x{input_num}"),
-                    ("confounds", f"confounds_x{input_num}"),
-                    ("events", f"events_x{input_num}")
+                    ("confounds", f"confounds_x{input_num}")
                 ]),
                 (run_exclusion_wf, input_merging_node, [
                     ("outputnode.include", f"include_x{input_num}"),
@@ -796,7 +792,6 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
             ("tmask_file", "tmask_files"),
             ("design_matrix", "design_matrices"),
             ("confounds", "confounds"),
-            ("events", "events"),
         ])
     ])
 
@@ -907,48 +902,6 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
         ),
         name=f"{func_space}_inclusion_report_ds"
     )
-
-    reporting_wf = build_reporting_workflow(task=all_opts.task_rename)
-    workflow.connect([
-        (regression_wf, reporting_wf, [
-            ("outputnode.design_matrix", "inputnode.design_matrix"),
-            ("outputnode.tmask_file", "inputnode.final_tmask_file"),
-            ("outputnode.execute", "inputnode.execute")
-        ]),
-        (input_merging_node, reporting_wf, [
-            ("tmask_file", "inputnode.run_tmask_files"),
-            ("confounds", "inputnode.confounds_files"),
-            ("include", "inputnode.inclusion_list"),
-            ("exclusion_table", "inputnode.exclusion_tables")
-        ]),
-        (tmask_ds, design_sources_node, [
-            ("out_file", "file_3")
-        ]),
-        (design_sources_node, design_ds, [
-            ("sources", "Sources")
-        ]),
-        (regression_wf, design_ds, [
-            ("outputnode.design_matrix", "in_file"),
-            ("outputnode.execute", "execute"),
-        ]),
-        (reporting_wf, design_plot_ds, [
-            ("outputnode.design_plot", "in_file")
-        ]),
-        (regression_wf, design_plot_ds, [
-            ("outputnode.execute", "execute"),
-        ]),
-        (reporting_wf, design_corr_ds, [
-            ("outputnode.design_correlations", "in_file"),
-        ]),
-        (regression_wf, design_corr_ds, [
-            ("outputnode.execute", "execute"),
-        ]),
-        (reporting_wf, inclusion_report_ds, [
-            ("outputnode.exclusion_report", "in_file")
-        ])
-    ])
-  
-
     unmasked_design_ds = Node(
         FLADataSink(
             base_directory=all_opts.datasink_path.parent,
@@ -972,35 +925,59 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
         ),
         name=f"{func_space}_unmasked_design_sources_node"
     )
+
+    reporting_wf = build_reporting_workflow(task=all_opts.task_rename)
     workflow.connect([
+        (regression_wf, reporting_wf, [
+            ("outputnode.design_matrix", "inputnode.design_matrix"),
+            ("outputnode.tmask_file", "inputnode.final_tmask_file"),
+            ("outputnode.execute", "inputnode.execute")
+        ]),
+        (input_merging_node, reporting_wf, [
+            ("tmask_file", "inputnode.run_tmask_files"),
+            ("confounds", "inputnode.confounds_files"),
+            ("include", "inputnode.inclusion_list"),
+            ("exclusion_table", "inputnode.exclusion_tables")
+        ]),
+        (find_included_sources_node, design_sources_node, [
+            ("design_matrices", "file_1")
+        ]),
+        (tmask_ds, design_sources_node, [
+            ("out_file", "file_2")
+        ]),
+        (design_sources_node, design_ds, [
+            ("sources", "Sources")
+        ]),
+        (regression_wf, design_ds, [
+            ("outputnode.design_matrix", "in_file"),
+            ("outputnode.execute", "execute"),
+        ]),
+        (find_included_sources_node, unmasked_design_sources_node, [
+            ("design_matrices", "file_1")
+        ]),
         (unmasked_design_sources_node, unmasked_design_ds, [
             ("sources", "Sources")
         ]),
         (regression_wf, unmasked_design_ds, [
             ("outputnode.unmasked_design_matrix", "in_file"),
             ("outputnode.execute", "execute")
+        ]),
+        (reporting_wf, design_plot_ds, [
+            ("outputnode.design_plot", "in_file")
+        ]),
+        (regression_wf, design_plot_ds, [
+            ("outputnode.execute", "execute"),
+        ]),
+        (reporting_wf, design_corr_ds, [
+            ("outputnode.design_correlations", "in_file"),
+        ]),
+        (regression_wf, design_corr_ds, [
+            ("outputnode.execute", "execute"),
+        ]),
+        (reporting_wf, inclusion_report_ds, [
+            ("outputnode.exclusion_report", "in_file")
         ])
     ])
-    if all_opts.save_intermediates:
-        workflow.connect([
-            (find_included_sources_node, design_sources_node, [
-                ("design_matrices", "file_1")
-            ]),
-            (find_included_sources_node, unmasked_design_sources_node, [
-                ("design_matrices", "file_1")
-            ])
-        ])
-    else:
-        workflow.connect([
-            (find_included_sources_node, design_sources_node, [
-                ("events", "file_1"),
-                ("confounds", "file_2"),
-            ]),
-            (find_included_sources_node, unmasked_design_sources_node, [
-                ("events", "file_1"),
-                ("confounds", "file_2"),
-            ])
-        ])
 
     # save the beta weights and test results
     beta_sources_node = Node(
@@ -1128,25 +1105,6 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
             ("beta_labels", "condition"),
         ]),
     ])
-    # else:
-    #     workflow.connect([
-    #         (regression_wf, beta_sources_node, [
-    #             ("beta_labels", "match_list")
-    #         ]),
-    #         (regression_wf, beta_weights_ds, [
-    #             ("outputnode.beta_files", "in_file"),
-    #             ("outputnode.beta_labels", "condition"),
-    #         ]),
-    #         (regression_wf, t_stat_ds, [
-    #             ("outputnode.beta_files", "in_file"),
-    #             ("outputnode.beta_labels", "condition"),
-    #         ]),
-    #         (regression_wf, p_val_ds, [
-    #             ("outputnode.beta_files", "in_file"),
-    #             ("outputnode.beta_labels", "condition"),
-    #         ]),
-    #     ])
-    
 
     if all_opts.save_intermediates:
         residual_bold_ds = Node(

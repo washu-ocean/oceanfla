@@ -96,15 +96,16 @@ def mock_global_logger(monkeypatch):
 
     yield mock_logger
 
-@pytest.fixture
-def dummy_nifti(tmp_path):
+@pytest.fixture(scope="session")
+def dummy_nifti(tmp_path_factory):
+    tmp_dir = tmp_path_factory.mktemp("dummy")
     data = np.random.default_rng(0).normal(size=(10, 11, 12, 8)).astype(np.float32)
     img = nib.Nifti1Image(data, affine=np.eye(4))
-    bold_path = tmp_path / "dummy_bold.nii.gz"
+    bold_path = tmp_dir / "dummy_bold.nii.gz"
     nib.save(img, bold_path)
 
     mask_data = np.ones((10, 11, 12), dtype=np.uint8)
-    mask_path = tmp_path / "brain_mask.nii.gz"
+    mask_path = tmp_dir / "brain_mask.nii.gz"
     nib.save(nib.Nifti1Image(mask_data, np.eye(4)), mask_path)
 
     return {
@@ -116,7 +117,7 @@ def dummy_nifti(tmp_path):
 
 
 @pytest.fixture(scope="session")
-def bids_layouts(tmp_path_factory):
+def bids_layouts(tmp_path_factory, dummy_nifti):
 
     base = tmp_path_factory.mktemp("dataset")
     raw_bids_dir = base / "rawdata"
@@ -124,8 +125,10 @@ def bids_layouts(tmp_path_factory):
     generate_bids_skeleton(raw_bids_dir, RAW_LAYOUT)
     generate_bids_skeleton(preproc_bids_dir, PREPROC_LAYOUT)
 
-    # for bold_file in raw_bids_dir.glob("**/sub*.nii.gz"):
-    #     nib.save(dummy_nifti["img"], bold_file)
+    for bold_file in raw_bids_dir.glob("**/sub*.nii.gz"):
+        nib.save(dummy_nifti["bold_img"], bold_file)
+    for bold_file in preproc_bids_dir.glob("**/sub*.nii.gz"):
+        nib.save(dummy_nifti["bold_img"], bold_file)
     
     work_dir = base / "work"
     work_dir.mkdir(exist_ok=True)
@@ -178,6 +181,8 @@ def opts(request, bids_layouts, dummy_nifti):
         parametric_modulators=None,
         group=None,
         ignore=None,
+        continuous_vars=None,
+        continuous_columns=None,
         repetition_time=2.0,
         confounds=[],
         exclude_run_mean=False,
@@ -210,9 +215,10 @@ def opts(request, bids_layouts, dummy_nifti):
         mem_gb=5
     )
 
-    kwargs = request.param
-    for k, v in kwargs.items():
-        setattr(opts, k, v)
+    if hasattr(request, "param"):
+        kwargs = request.param
+        for k, v in kwargs.items():
+            setattr(opts, k, v)
 
     return opts
 
