@@ -115,10 +115,12 @@ def build_session_wf(subject, session=None):
     inputnode.inputs.subject = subject
     inputnode.inputs.session = session
 
-    space_run_info, ref_space = parse_session_bold_files(layout=all_opts.preproc_layout,
-                                              subject=subject,
-                                              session=session,
-                                              tasks=all_opts.task)
+    space_run_info, ref_space = parse_session_bold_files(
+        layout=all_opts.preproc_layout,
+        subject=subject,
+        session=session,
+        tasks=all_opts.task,
+        tr=all_opts.repetition_time)
     
     if all_opts.func_space not in space_run_info:
         logger.warning(f"NO BOLD RUNS FOUND FOR SUBJECT:{subject}, SESSION:{session}, TEMPLATE_SPACE:{all_opts.func_space}")
