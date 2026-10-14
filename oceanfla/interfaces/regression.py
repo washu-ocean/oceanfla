@@ -36,10 +36,6 @@ class RunGLMRegressionInputSpec(OptionalInterfaceSpec):
         usedefault=True,
         desc="The brain mask that accompanies volumetric data"
     )
-    # skip_regression = traits.Bool(
-    #     default_value=False,
-    #     desc="Whether the regression should be skipped or not"
-    # )
 
 
 class RunGLMRegressionOutputSpec(OptionalInterfaceSpec):
