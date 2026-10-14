@@ -1,4 +1,3 @@
-from IPython.conftest import work_path
 from nipype.interfaces.utility.base import MergeInputSpec, _ravel
 from nipype.interfaces.io import IOBase, add_traits
 from nipype.interfaces.base import (
