@@ -14,7 +14,7 @@ class _FilterDataInputSpec(OptionalInterfaceSpec):
     )
     tmask_in = File(
         exists=True, mandatory=True,
-        desc="Run mask (as a .txt)."
+        desc="Run mask (as a .tsv)."
     )
     high_pass = traits.Union(
         None,
@@ -102,8 +102,9 @@ def filter_data(func_file: str,
     from nilearn.signal import butterworth, _handle_scrubbed_volumes
     from oceanfla.utilities import load_data, create_image_like, replace_entities
     import numpy as np
+    import pandas as pd
 
-    mask = np.loadtxt(tmask_file).astype(bool)
+    mask = pd.read_csv(tmask_file, sep="\t")["tmask"].to_numpy().astype(bool)
     func_data = load_data(func_file, brain_mask)
 
     if not any((
@@ -178,7 +179,7 @@ class PercentChangeInputSpec(OptionalInterfaceSpec):
 
     tmask_in = File(
         exists=True, mandatory=True,
-        desc="Run mask (as a .txt)."
+        desc="Run mask (as a .tsv)."
     )
 
     brain_mask = traits.Union(
@@ -214,10 +215,11 @@ def percent_signal_change(func_file: str,
                           brain_mask: str = None):
     from oceanfla.utilities import load_data, create_image_like, replace_entities
     import numpy as np
+    import pandas as pd
     from oceanfla.config import get_logger
     logger = get_logger("nipype.interface")
 
-    mask = np.loadtxt(tmask_file).astype(bool)
+    mask = pd.read_csv(tmask_file, sep="\t")["tmask"].to_numpy().astype(bool)
     data = load_data(func_file, brain_mask)
 
     masked_data = data[mask, :]

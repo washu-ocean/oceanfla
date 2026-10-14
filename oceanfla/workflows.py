@@ -3,19 +3,18 @@ from nipype.interfaces.io import BIDSDataGrabber
 from nipype.interfaces.utility import IdentityInterface, Select
 # from niworkflows.utils.bids import collect_participants
 from oceanfla.interfaces.reporting import PlotDesign, ReportExclusions
-from oceanfla.interfaces.utility import FLADataSink, ReadMetadataFile
+from oceanfla.interfaces.utility import BIDSSource, FLADataSink
 from oceanfla.interfaces.clean import FilterData, PercentChange
-from oceanfla.interfaces.events import EventsMatrix, FindContinuousVars, ModifyEventsFile, get_number_of_volumes
-from oceanfla.interfaces.exclusions import CheckExclusionFile, CheckRunRetention, CheckRuntSNR, MakeRunExclusionTable
+from oceanfla.interfaces.events import EventsMatrix, FindContinuousVars, ModifyEventsFile
+from oceanfla.interfaces.exclusions import CheckExclusionFile, CheckRunRetention, CheckRuntSNR, GetIncludedFiles, MakeRunExclusionTable
 from oceanfla.interfaces.nuisance import GenerateNuisanceMatrix
 from oceanfla.interfaces.regression import CombineFIRBetas, ConcatRegressionData, MakeRunDesign, RunGLMRegression
 from oceanfla.interfaces.tmask import FindDscans, MakeTmask, RemoveMotionMasking, make_tmask_tsv
 from oceanfla.interfaces.utility import MergeUnique, ExtractDataGroup
-from oceanfla.config import all_opts, get_bids_file, get_logger
-from oceanfla.interfaces.workbench_utils import CiftiParcellate, VolumeSmooth, SurfaceSmooth
+from oceanfla.config import all_opts, get_logger
+from oceanfla.interfaces.workbench_utils import VolumeSmooth, SurfaceSmooth
 from oceanfla.utilities import is_cifti_file, is_nifti_file, parse_session_bold_files
 from bids.utils import listify
-from bids.layout import parse_file_entities
 from pathlib import Path
 
 logger = get_logger("nipype.workflow")
@@ -116,7 +115,7 @@ def build_session_wf(subject, session=None):
     inputnode.inputs.subject = subject
     inputnode.inputs.session = session
 
-    space_run_info = parse_session_bold_files(layout=all_opts.preproc_layout,
+    space_run_info, ref_space = parse_session_bold_files(layout=all_opts.preproc_layout,
                                               subject=subject,
                                               session=session,
                                               tasks=all_opts.task)
@@ -124,6 +123,9 @@ def build_session_wf(subject, session=None):
     if all_opts.func_space not in space_run_info:
         logger.warning(f"NO BOLD RUNS FOUND FOR SUBJECT:{subject}, SESSION:{session}, TEMPLATE_SPACE:{all_opts.func_space}")
         return None
+
+    if all_opts.func_space:
+        ref_space = all_opts.func_space
     
     confounds_grabber = Node(
         BIDSDataGrabber(
@@ -178,18 +180,24 @@ def build_session_wf(subject, session=None):
     )
     # for task, bold_list in space_run_info[list(space_run_info.keys())[0]].items():
     merge_index = 0
-    for task, bold_list in space_run_info[all_opts.func_space].items():
-        for bold_run in bold_list:
-            bold_bids = get_bids_file(bold_run)
-            run = str(bold_bids.entities.get("run", "01"))
+    for task, bold_list in space_run_info[ref_space].items():
+        if task == "extension":
+            continue
+        for bold_info in bold_list:
+            # bold_bids = get_bids_file(bold_run)
+            run = bold_info["run"]
 
             bold_run_identity_node = Node(
                 IdentityInterface(
-                    fields=["bold_file"]
+                    fields=[
+                        "tr",
+                        "volumes"
+                    ]
                 ),
                 name=f"{task}_run_{run}_bold_identity_node"
             )
-            bold_run_identity_node.inputs.bold_file = bold_run
+            bold_run_identity_node.inputs.tr = bold_info["tr"]
+            bold_run_identity_node.inputs.volumes = bold_info["volumes"]
 
             ses_design_wf = build_ses_design_wf(run, task)
 
@@ -207,7 +215,8 @@ def build_session_wf(subject, session=None):
                     ("session", "inputnode.session"),
                 ]),
                 (bold_run_identity_node, ses_design_wf, [
-                    ("bold_file", "inputnode.bold_file")
+                    ("tr", "inputnode.tr"),
+                    ("volumes", "inputnode.volumes")
                 ]),
                 (confounds_grabber, extract_task_run_souce_node, [
                     ("confounds", "confounds")
@@ -235,7 +244,7 @@ def build_session_wf(subject, session=None):
     #### only doing one functional space at a time ######
     # for func_space, space_dict in space_run_info.items():
     space_dict = space_run_info[all_opts.func_space]
-    file_extension = parse_file_entities(list(space_dict.items())[0][1][0])["extension"]
+    file_extension = space_dict.pop("extension")
     func_space_wf = build_func_space_wf(func_space=all_opts.func_space,
                                         run_map=space_dict,
                                         file_extension=file_extension)
@@ -268,9 +277,10 @@ def build_ses_design_wf(run, task):
             fields=[
                 "subject",
                 "session",
-                "bold_file",
                 "confounds_file",
                 "events_file",
+                "tr",
+                "volumes"
             ]
         ),
         name="inputnode"
@@ -300,10 +310,62 @@ def build_ses_design_wf(run, task):
         (inputnode, tmask_node, [
             ("confounds_file", "confounds_file")
         ]),
-        (tmask_node, outputnode, [
-            ("tmask_file", "tmask_file"),
-        ])
     ]) 
+
+
+    ### save out the run-level tmask files
+    make_tmask_tsv_node = Node(
+        Function(
+            function=make_tmask_tsv,
+            input_names=["tmask_file", "fd_threshold", "execute"],
+            output_names=["tmask_tsv"]
+        ),
+        name="make_tmask_tsv_node"
+    )
+    make_tmask_tsv_node.inputs.fd_threshold = all_opts.fd_threshold
+    tmask_ds = Node(
+        FLADataSink(
+            base_directory=all_opts.datasink_path.parent,
+            out_path_base=all_opts.datasink_path.name,
+            extra_bids_patterns=all_opts.bids_patterns,
+            suffix="tmask",
+            FramewiseDisplacementThreshold=f"{all_opts.fd_threshold}mm",
+            NonSteadyStateVolumesDiscardedFromStart=all_opts.start_censoring,
+            NeighborMaskingLength=all_opts.minimum_unmasked_neighbors,
+            Description="Temporal Mask"
+            
+        ),  
+        name="tmask_ds"
+    )
+    tmask_sources_node = Node(
+        BIDSSource(
+            raw_dataset=all_opts.raw_bids,
+            preprocessed_dataset=all_opts.preproc_bids,
+            datasink_path=all_opts.datasink_path,
+            work_path=all_opts.work
+        ),
+        name="tmask_sources_node"
+    )
+    workflow.connect([
+        (inputnode, tmask_sources_node, [
+            ("confounds_file", "file_1")
+        ]),
+        (tmask_sources_node, tmask_ds,[
+            ("sources", "Sources")
+        ]),
+        (tmask_node, make_tmask_tsv_node, [
+            ("tmask_file", "tmask_file")
+        ]),
+        (inputnode, tmask_ds, [
+            ("events_file", "source_file")
+        ]),
+        (make_tmask_tsv_node, tmask_ds, [
+            ("tmask_tsv", "in_file")
+        ]),
+        (tmask_ds, outputnode, [
+            ("out_file", "tmask_file")
+        ])
+    ])
     
     ### Find Dummy scans if supplied ###
     if all_opts.dscans_path:
@@ -315,28 +377,15 @@ def build_ses_design_wf(run, task):
         )
         workflow.connect([
             (inputnode, find_dscans_node, [
-                ("bold_file", "source_file")
+                ("events_file", "source_file")
             ]),
             (find_dscans_node, tmask_node, [
                 ("dscans_file", "dscans_tsv")
+            ]),
+            (find_dscans_node, tmask_sources_node,[
+                ("dscans_file", "file_2")
             ])
         ])
-
-    ### create node to get the number of volumes in the bold run ###
-    get_volumes_node = Node(
-        Function(
-            function=get_number_of_volumes,
-            input_names=["bold_in", "brain_mask"],
-            output_names=["volumes"]
-        ),
-        name=f"task_{task}_run_{run}_get_run_volumes_node"
-    )
-    get_volumes_node.inputs.brain_mask = all_opts.brain_mask
-    workflow.connect([
-        (inputnode, get_volumes_node, [
-            ("bold_file", "bold_in")
-        ])
-    ])
 
     ### Create run-level event matrix ###
     events_matrix_node = Node(
@@ -352,12 +401,13 @@ def build_ses_design_wf(run, task):
         name="events_matrix_node"
     )
     workflow.connect([
-        (get_volumes_node, events_matrix_node, [
+        (inputnode, events_matrix_node, [
+            ("tr", "tr"),
             ("volumes", "volumes")
         ])
     ])
 
-    ### Group task regressors of ignore some if requested ###
+    ### Group task regressors if requested ###
     if all_opts.group:
         modify_events_file_node = Node(
             ModifyEventsFile(
@@ -377,26 +427,6 @@ def build_ses_design_wf(run, task):
         workflow.connect([
             (inputnode, events_matrix_node, [
                 ("events_file", "event_file")
-            ])
-        ])
-
-    ### Get the TR if needed ###
-    if all_opts.repetition_time:
-        events_matrix_node.inputs.tr = all_opts.repetition_time
-    else:
-        get_metadata_node = Node(
-            ReadMetadataFile(
-                fields=["RepetitionTime"],
-                error_on_missing=True,
-            ),
-            name=f"task_{task}_run_{run}_get_metadata_node"
-        )
-        workflow.connect([
-            (inputnode, get_metadata_node, [
-                ("bold_file", "bids_file")
-            ]),
-            (get_metadata_node, events_matrix_node, [
-                ("RepetitionTime", "tr")
             ])
         ])
 
@@ -462,80 +492,86 @@ def build_ses_design_wf(run, task):
         (nuisance_mat_node, make_run_designs_node, [
             ("nuisance_matrix", "nuisance_matrix")
         ]),
-        (make_run_designs_node, outputnode, [
-            ("main_design", "main_design"),
-            ("nuisance_design", "nuisance_design")
-        ])
     ])
 
-    ### save out the run-level tmask files
-    make_tmask_tsv_node = Node(
-        Function(
-            function=make_tmask_tsv,
-            input_names=["tmask_file", "fd_threshold", "execute"],
-            output_names=["tmask_tsv"]
-        ),
-        name="make_tmask_tsv_node"
-    )
-    make_tmask_tsv_node.inputs.fd_threshold = all_opts.fd_threshold
-    tmask_ds = Node(FLADataSink(
+    hrf_model_desc = f"{all_opts.hrf[0]:02.2f}s to Peak & {all_opts.hrf[1]:02.2f}s Undershoot Duration" if all_opts.hrf else "",
+    fir_model_desc = f"{all_opts.fir:02d} Frames" if all_opts.fir else ""
+
+    ### Save these other run-level files out if requested ###
+    main_design_ds = Node(FLADataSink(
         base_directory=all_opts.datasink_path.parent,
         out_path_base=all_opts.datasink_path.name,
         extra_bids_patterns=all_opts.bids_patterns,
-        suffix="tmask"
+        desc="event",
+        suffix="design",
+        HRFModel=hrf_model_desc,
+        FIRModel=fir_model_desc,
     ),
-        name="tmask_ds"
+        name="main_design_ds"
+    )
+    design_sources_node = Node(
+        BIDSSource(
+            raw_dataset=all_opts.raw_bids,
+            preprocessed_dataset=all_opts.preproc_bids,
+            datasink_path=all_opts.datasink_path,
+            work_path=all_opts.work
+        ),
+        name="main_design_sources_node"
     )
     workflow.connect([
-        (tmask_node, make_tmask_tsv_node, [
-            ("tmask_file", "tmask_file")
+        (inputnode, design_sources_node, [
+            ("events_file", "file_1"),
+            ("confounds_file", "file_2")
         ]),
-        (inputnode, tmask_ds, [
-            ("events_file", "source_file")
+        (design_sources_node, main_design_ds, [
+            ("sources", "Sources")
         ]),
-        (make_tmask_tsv_node, tmask_ds, [
-            ("tmask_tsv", "in_file")
+        (inputnode, main_design_ds, [
+            ("events_file", "source_file"),
+            ("tr", "RepetitionTime")
+        ]),
+        (make_run_designs_node, main_design_ds, [
+            ("main_design", "in_file")
+        ]),
+        (main_design_ds, outputnode, [
+            ("out_file", "main_design")
         ])
     ])
 
-    ### Save these other run-level files out if requested ###
-    if all_opts.save_intermediates:
-        main_design_ds = Node(FLADataSink(
+    if nuisance_regressors:
+        nuisance_design_ds = Node(FLADataSink(
             base_directory=all_opts.datasink_path.parent,
             out_path_base=all_opts.datasink_path.name,
             extra_bids_patterns=all_opts.bids_patterns,
-            desc="event",
-            suffix="design"
+            desc="nuisance",
+            suffix="design",
+            HRFModel=hrf_model_desc,
+            FIRModel=fir_model_desc,
         ),
-            name="main_design_ds"
+            name="nuisance_design_ds"
         )
         workflow.connect([
-            (inputnode, main_design_ds, [
-                ("events_file", "source_file")
+            (design_sources_node, nuisance_design_ds, [
+                ("sources", "Sources")
             ]),
-            (make_run_designs_node, main_design_ds, [
-                ("main_design", "in_file")
+            (inputnode, nuisance_design_ds, [
+                ("confounds_file", "source_file"),
+                ("tr", "RepetitionTime")
+            ]),
+            (make_run_designs_node, nuisance_design_ds, [
+                ("nuisance_design", "in_file")
+            ]),
+            (nuisance_design_ds, outputnode, [
+                ("out_file", "nuisance_design")
+            ])
+        ])
+    else:
+        workflow.connect([
+            (make_run_designs_node, outputnode, [
+                ("nuisance_design", "nuisance_design")
             ])
         ])
 
-        if nuisance_regressors:
-            nuisance_design_ds = Node(FLADataSink(
-                base_directory=all_opts.datasink_path.parent,
-                out_path_base=all_opts.datasink_path.name,
-                extra_bids_patterns=all_opts.bids_patterns,
-                desc="nuisance",
-                suffix="design"
-            ),
-                name="nuisance_design_ds"
-            )
-            workflow.connect([
-                (inputnode, nuisance_design_ds, [
-                    ("confounds_file", "source_file")
-                ]),
-                (make_run_designs_node, nuisance_design_ds, [
-                    ("nuisance_design", "in_file")
-                ])
-            ])
     
     return workflow
 
@@ -621,17 +657,21 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
     # Create a run-level workflow for each run that has this functional space
     input_num = 1
     for task, bold_list in run_map.items():
-        for bold_run in bold_list:
-            bold_bids = get_bids_file(bold_run)
-            run = str(bold_bids.entities.get("run", "01"))
+        for bold_info in bold_list:
+            # bold_bids = get_bids_file(bold_run)
+            run = bold_info["run"]
 
             bold_run_identity_node = Node(
                 IdentityInterface(
-                    fields=["bold_file"]
+                    fields=[
+                        "bold_file",
+                        "tr"
+                    ]
                 ),
                 name=f"{task}_run_{run}_bold_identity_node"
             )
-            bold_run_identity_node.inputs.bold_file = bold_run
+            bold_run_identity_node.inputs.bold_file = bold_info["bold_file"]
+            bold_run_identity_node.inputs.tr = bold_info["tr"]
 
             # Define a node to extract the run-specific files from the data-grabbers
             extract_task_run_design_node = Node(
@@ -674,35 +714,41 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
             # Connect the files to the run-level workflow
             workflow.connect([
                 (inputnode, run_level_wf, [
-                    ("subject", "inputnode.subject"),
-                    ("session", "inputnode.session"),
+                    ("subject", "main_inputnode.subject"),
+                    ("session", "main_inputnode.session"),
                 ]),
                 (extract_task_run_design_node, run_level_wf, [
-                    ("tmask_file", "inputnode.tmask_file"),
-                    ("nuisance_design", "inputnode.nuisance_design"),
+                    ("tmask_file", "main_inputnode.tmask_file"),
+                    ("nuisance_design", "main_inputnode.nuisance_design"),
                 ]),
                 (bold_run_identity_node, run_level_wf, [
-                    ("bold_file", "inputnode.bold_file")
+                    ("bold_file", "main_inputnode.bold_file"),
+                    ("tr", "main_inputnode.tr")
                 ]),
                 (run_exclusion_wf, run_level_wf, [
-                    ("outputnode.include", f"inputnode.include")
+                    ("outputnode.include", f"main_inputnode.include")
                 ])
             ])
 
             if is_cifti_file(file_extension) and all_opts.fwhm:
                 workflow.connect([
                     (lh_list_select_node, run_level_wf, [
-                        ("out", "inputnode.lh_surf")
+                        ("out", "main_inputnode.lh_surf")
                     ]),
                     (rh_list_select_node, run_level_wf, [
-                        ("out", "inputnode.rh_surf")
+                        ("out", "main_inputnode.rh_surf")
                     ])
                 ])
 
-            # Connect the output of the run-level workflows to the merging node
+            # Connect the output of the run-level workflows to the merging node.
+            # The merge must consume the workflow's final result node, not the nested
+            # regression workflow output.
             workflow.connect([
+                (bold_run_identity_node, input_merging_node, [
+                    ("tr", f"tr_x{input_num}")
+                ]),
                 (run_level_wf, input_merging_node, [
-                    ("outputnode.bold_file", f"bold_file_x{input_num}")
+                    ("final_outputnode.processed_bold", f"bold_file_x{input_num}")
                 ]),
                 (extract_task_run_design_node, input_merging_node, [
                     ("tmask_file", f"tmask_file_x{input_num}"),
@@ -734,10 +780,215 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
         ])
     ])
 
+    find_included_sources_node = Node(
+        GetIncludedFiles(),
+        name="find_included_sources_node"
+    )
+    workflow.connect([
+        (input_merging_node, find_included_sources_node, [
+            ("include", "included"),
+            ("bold_file", "bold_files"),
+            ("tmask_file", "tmask_files"),
+            ("design_matrix", "design_matrices"),
+            ("confounds", "confounds"),
+        ])
+    ])
+
 
     ### Datasink for user outputs ###
-    bold_runs_list = [bf for bold_list in run_map.values() for bf in bold_list]
+    bold_runs_list = [bi["bold_file"] for bold_list in run_map.values() for bi in bold_list]
     need_compress = file_extension.endswith(".gz")
+
+    # save the session-level tmask
+    tmask_ds = Node(
+        FLADataSink(
+            base_directory=all_opts.datasink_path.parent,
+            out_path_base=all_opts.datasink_path.name,
+            extra_bids_patterns=all_opts.bids_patterns,
+            dismiss_entities=["desc", "run", "den"],
+            suffix="tmask",
+            task=all_opts.task_rename,
+            source_file=bold_runs_list,
+            Description="Concatenated Temporal Mask"
+        ),
+        name=f"{func_space}_tmask_ds"
+    )
+    tmask_sources_node = Node(
+        BIDSSource(
+            raw_dataset=all_opts.raw_bids,
+            preprocessed_dataset=all_opts.preproc_bids,
+            datasink_path=all_opts.datasink_path,
+            work_path=all_opts.work
+        ),
+        name=f"{func_space}_tmask_sources_node"
+    )
+    workflow.connect([
+        (find_included_sources_node, tmask_sources_node, [
+            ("tmask_files", "file_1")
+        ]),
+        (tmask_sources_node, tmask_ds, [
+            ("sources", "Sources")
+        ]),
+        (regression_wf, tmask_ds, [
+            ("outputnode.tmask_file", "in_file"),
+            ("outputnode.execute", "execute")
+        ])
+    ])
+
+    # save design and reporting info 
+    design_ds = Node(
+        FLADataSink(
+            base_directory=all_opts.datasink_path.parent,
+            out_path_base=all_opts.datasink_path.name,
+            extra_bids_patterns=all_opts.bids_patterns,
+            dismiss_entities=["run", "den"],
+            desc="final",
+            space=func_space,
+            suffix="design",
+            task=all_opts.task_rename,
+            source_file=bold_runs_list
+        ),
+        name=f"{func_space}_design_ds"
+    )
+    design_plot_ds = Node(
+        FLADataSink(
+            base_directory=all_opts.datasink_path.parent,
+            out_path_base=all_opts.datasink_path.name,
+            extra_bids_patterns=all_opts.bids_patterns,
+            dismiss_entities=["run", "den"],
+            desc="final",
+            space=func_space,
+            suffix="design",
+            task=all_opts.task_rename,
+            source_file=bold_runs_list
+        ),
+        name=f"{func_space}_design_plot_ds"
+    )
+    design_sources_node = Node(
+        BIDSSource(
+            raw_dataset=all_opts.raw_bids,
+            preprocessed_dataset=all_opts.preproc_bids,
+            datasink_path=all_opts.datasink_path,
+            work_path=all_opts.work
+        ),
+        name=f"{func_space}_design_sources_node"
+    )
+    design_corr_ds = Node(
+        FLADataSink(
+            base_directory=all_opts.datasink_path.parent,
+            out_path_base=all_opts.datasink_path.name,
+            extra_bids_patterns=all_opts.bids_patterns,
+            dismiss_entities=["run", "den"],
+            desc="final",
+            space=func_space,
+            suffix="correlations",
+            task=all_opts.task_rename,
+            source_file=bold_runs_list
+        ),
+        name=f"{func_space}_design_corr_ds"
+    )
+    inclusion_report_ds = Node(
+        FLADataSink(
+            base_directory=all_opts.datasink_path.parent,
+            out_path_base=all_opts.datasink_path.name,
+            extra_bids_patterns=all_opts.bids_patterns,
+            dismiss_entities=["run", "den"],
+            desc="inclusion",
+            space=func_space,
+            suffix="report",
+            task=all_opts.task_rename,
+            source_file=bold_runs_list
+        ),
+        name=f"{func_space}_inclusion_report_ds"
+    )
+    unmasked_design_ds = Node(
+        FLADataSink(
+            base_directory=all_opts.datasink_path.parent,
+            out_path_base=all_opts.datasink_path.name,
+            extra_bids_patterns=all_opts.bids_patterns,
+            dismiss_entities=["run", "den"],
+            desc="unmasked",
+            space=func_space,
+            suffix="design",
+            task=all_opts.task_rename,
+            source_file=bold_runs_list
+        ),
+        name=f"{func_space}_unmasked_design_ds"
+    )
+    unmasked_design_sources_node = Node(
+        BIDSSource(
+            raw_dataset=all_opts.raw_bids,
+            preprocessed_dataset=all_opts.preproc_bids,
+            datasink_path=all_opts.datasink_path,
+            work_path=all_opts.work
+        ),
+        name=f"{func_space}_unmasked_design_sources_node"
+    )
+
+    reporting_wf = build_reporting_workflow(task=all_opts.task_rename)
+    workflow.connect([
+        (regression_wf, reporting_wf, [
+            ("outputnode.design_matrix", "inputnode.design_matrix"),
+            ("outputnode.tmask_file", "inputnode.final_tmask_file"),
+            ("outputnode.execute", "inputnode.execute")
+        ]),
+        (input_merging_node, reporting_wf, [
+            ("tmask_file", "inputnode.run_tmask_files"),
+            ("confounds", "inputnode.confounds_files"),
+            ("include", "inputnode.inclusion_list"),
+            ("exclusion_table", "inputnode.exclusion_tables")
+        ]),
+        (find_included_sources_node, design_sources_node, [
+            ("design_matrices", "file_1")
+        ]),
+        (tmask_ds, design_sources_node, [
+            ("out_file", "file_2")
+        ]),
+        (design_sources_node, design_ds, [
+            ("sources", "Sources")
+        ]),
+        (regression_wf, design_ds, [
+            ("outputnode.design_matrix", "in_file"),
+            ("outputnode.execute", "execute"),
+        ]),
+        (find_included_sources_node, unmasked_design_sources_node, [
+            ("design_matrices", "file_1")
+        ]),
+        (unmasked_design_sources_node, unmasked_design_ds, [
+            ("sources", "Sources")
+        ]),
+        (regression_wf, unmasked_design_ds, [
+            ("outputnode.unmasked_design_matrix", "in_file"),
+            ("outputnode.execute", "execute")
+        ]),
+        (reporting_wf, design_plot_ds, [
+            ("outputnode.design_plot", "in_file")
+        ]),
+        (regression_wf, design_plot_ds, [
+            ("outputnode.execute", "execute"),
+        ]),
+        (reporting_wf, design_corr_ds, [
+            ("outputnode.design_correlations", "in_file"),
+        ]),
+        (regression_wf, design_corr_ds, [
+            ("outputnode.execute", "execute"),
+        ]),
+        (reporting_wf, inclusion_report_ds, [
+            ("outputnode.exclusion_report", "in_file")
+        ])
+    ])
+
+    # save the beta weights and test results
+    beta_sources_node = Node(
+        BIDSSource(
+            raw_dataset=all_opts.raw_bids,
+            preprocessed_dataset=all_opts.preproc_bids,
+            datasink_path=all_opts.datasink_path,
+            work_path=all_opts.work
+        ),
+        name = "beta_sources_node"
+    )
+
     beta_weights_ds = Node(
         FLADataSink(
             base_directory=all_opts.datasink_path.parent,
@@ -749,14 +1000,25 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
             stat="effect",
             task=all_opts.task_rename,
             allowed_entities=("condition", "stat"),
-            source_file=bold_runs_list
+            source_file=bold_runs_list,
+            Test="OLS"
         ),
         name=f"{func_space}_beta_weights_ds"
     )
     workflow.connect([
+        (find_included_sources_node, beta_sources_node, [
+            ("bold_files", "file_1")
+        ]),
+        (design_ds, beta_sources_node, [
+            ("out_file", "file_2")
+        ]),
+        (tmask_ds, beta_sources_node, [
+            ("out_file", "file_3")
+        ]),
+        (beta_sources_node, beta_weights_ds, [
+            ("sources", "Sources")
+        ]),
         (regression_wf, beta_weights_ds, [
-            ("outputnode.beta_files", "in_file"),
-            ("outputnode.beta_labels", "condition"),
             ("outputnode.execute", "execute")
         ])
     ])
@@ -772,14 +1034,16 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
             stat="t",
             task=all_opts.task_rename,
             allowed_entities=("condition", "stat"),
-            source_file=bold_runs_list
+            source_file=bold_runs_list,
+            Test="Wald T-test"
         ),
         name=f"{func_space}_t_stat_ds"
     )
     workflow.connect([
+        (beta_sources_node, t_stat_ds, [
+            ("sources", "Sources")
+        ]),
         (regression_wf, t_stat_ds, [
-            ("outputnode.tstat_files", "in_file"),
-            ("outputnode.beta_labels", "condition"),
             ("outputnode.execute", "execute")
         ])
     ])
@@ -795,54 +1059,51 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
             stat="p",
             task=all_opts.task_rename,
             allowed_entities=("condition", "stat"),
-            source_file=bold_runs_list
+            source_file=bold_runs_list,
+            Type="2-tailed",
+            Distribution="Student's T"
         ),
         name=f"{func_space}_p_val_ds"
     )
     workflow.connect([
+        (beta_sources_node, p_val_ds, [
+            ("sources", "Sources")
+        ]),
         (regression_wf, p_val_ds, [
-            ("outputnode.pval_files", "in_file"),
-            ("outputnode.beta_labels", "condition"),
             ("outputnode.execute", "execute")
         ])
     ])
 
-    if all_opts.fir:
-        combine_fir_betas_node = Node(
-            CombineFIRBetas(
-                brain_mask=all_opts.brain_mask
-            ),
-            name=f"{func_space}_combine_fir_betas_node"
-        )
-        combo_beta_weights_ds = Node(
-            FLADataSink(
-                base_directory=all_opts.datasink_path.parent,
-                out_path_base=all_opts.datasink_path.name,
-                compress=need_compress,
-                extra_bids_patterns=all_opts.bids_patterns,
-                dismiss_entities=["desc", "run", "den"],
-                suffix="boldmap",
-                stat="effect",
-                task=all_opts.task_rename,
-                allowed_entities=("condition", "stat"),
-                source_file=bold_runs_list
-            ),
-            name=f"{func_space}_fir_combo_beta_weights_ds"
-        )
-        workflow.connect([
-            (regression_wf, combine_fir_betas_node, [
-                ("outputnode.beta_files", "beta_files"),
-                ("outputnode.beta_labels", "beta_labels"),
-                ("outputnode.execute", "execute")
-            ]),
-            (combine_fir_betas_node, combo_beta_weights_ds, [
-                ("beta_files", "in_file"),
-                ("beta_labels", "condition"),
-            ]),
-            (regression_wf, combo_beta_weights_ds, [
-                ("outputnode.execute", "execute")
-            ])
-        ])
+    # if all_opts.fir:
+    combine_betas_node = Node(
+        CombineFIRBetas(
+            fir_count=all_opts.fir,
+            volterra_count=all_opts.volterra_lag,
+            brain_mask=all_opts.brain_mask,
+        ),
+        name=f"{func_space}_combine_fir_betas_node"
+    )
+    workflow.connect([
+        (regression_wf, combine_betas_node, [
+            ("outputnode.beta_files", "beta_files"),
+            ("outputnode.beta_labels", "beta_labels"),
+            ("outputnode.tstat_files", "tstat_files"),
+            ("outputnode.pval_files", "pval_files"),
+            ("outputnode.execute", "execute")
+        ]),
+        (combine_betas_node, beta_weights_ds, [
+            ("beta_files", "in_file"),
+            ("beta_labels", "condition"),
+        ]),
+        (combine_betas_node, t_stat_ds, [
+            ("beta_files", "in_file"),
+            ("beta_labels", "condition"),
+        ]),
+        (combine_betas_node, p_val_ds, [
+            ("beta_files", "in_file"),
+            ("beta_labels", "condition"),
+        ]),
+    ])
 
     if all_opts.save_intermediates:
         residual_bold_ds = Node(
@@ -858,7 +1119,25 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
             ),
             name=f"{func_space}_residual_bold_ds"
         )
+        residual_bold_sources_node = Node(
+            BIDSSource(
+                raw_dataset=all_opts.raw_bids,
+                preprocessed_dataset=all_opts.preproc_bids,
+                datasink_path=all_opts.datasink_path,
+                work_path=all_opts.work
+            ),
+            name = "residual_bold_sources_node"
+        )
         workflow.connect([
+            (find_included_sources_node, residual_bold_sources_node, [
+                ("bold_files", "file_1")
+            ]),
+            (design_ds, residual_bold_sources_node, [
+                ("out_file", "file_2")
+            ]),
+            (residual_bold_sources_node, residual_bold_ds, [
+                ("sources", "Sources")
+            ]),
             (regression_wf, residual_bold_ds, [
                 ("outputnode.bold_file", "in_file"),
                 ("outputnode.execute", "execute")
@@ -909,152 +1188,6 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
         ])
     ])
 
-    design_ds = Node(
-        FLADataSink(
-            base_directory=all_opts.datasink_path.parent,
-            out_path_base=all_opts.datasink_path.name,
-            extra_bids_patterns=all_opts.bids_patterns,
-            dismiss_entities=["run", "den"],
-            desc="final",
-            space=func_space,
-            suffix="design",
-            task=all_opts.task_rename,
-            source_file=bold_runs_list
-        ),
-        name=f"{func_space}_design_ds"
-    )
-    design_corr_ds = Node(
-        FLADataSink(
-            base_directory=all_opts.datasink_path.parent,
-            out_path_base=all_opts.datasink_path.name,
-            extra_bids_patterns=all_opts.bids_patterns,
-            dismiss_entities=["run", "den"],
-            desc="final",
-            space=func_space,
-            suffix="correlations",
-            task=all_opts.task_rename,
-            source_file=bold_runs_list
-        ),
-        name=f"{func_space}_design_corr_ds"
-    )
-    inclusion_report_ds = Node(
-        FLADataSink(
-            base_directory=all_opts.datasink_path.parent,
-            out_path_base=all_opts.datasink_path.name,
-            extra_bids_patterns=all_opts.bids_patterns,
-            dismiss_entities=["run", "den"],
-            desc="inclusion",
-            space=func_space,
-            suffix="report",
-            task=all_opts.task_rename,
-            source_file=bold_runs_list
-        ),
-        name=f"{func_space}_inclusion_report_ds"
-    )
-
-    # TODO: add Report workflow
-    reporting_wf = build_reporting_workflow(task=all_opts.task_rename)
-    workflow.connect([
-        (regression_wf, reporting_wf, [
-            ("outputnode.design_matrix", "inputnode.design_matrix"),
-            ("outputnode.tmask_file", "inputnode.final_tmask_file"),
-            ("outputnode.execute", "inputnode.execute")
-        ]),
-        (input_merging_node, reporting_wf, [
-            ("tmask_file", "inputnode.run_tmask_files"),
-            ("confounds", "inputnode.confounds_files"),
-            ("include", "inputnode.inclusion_list"),
-            ("exclusion_table", "inputnode.exclusion_tables")
-        ])
-    ])
-
-    design_merging_node = Node(
-        MergeUnique(),
-        name="merge_design_files_node"
-    )
-    workflow.connect([
-        (regression_wf, design_merging_node, [
-            ("outputnode.design_matrix", "design_x1"),
-        ]),
-        (reporting_wf, design_merging_node, [
-            ("outputnode.design_plot", "design_x2"),
-        ]),
-        (design_merging_node, design_ds, [
-            ("design", "in_file")
-        ]),
-        (regression_wf, design_ds, [
-            ("outputnode.execute", "execute"),
-        ]),
-        (reporting_wf, design_corr_ds, [
-            ("outputnode.design_correlations", "in_file"),
-        ]),
-        (regression_wf, design_corr_ds, [
-            ("outputnode.execute", "execute"),
-        ]),
-        (reporting_wf, inclusion_report_ds, [
-            ("outputnode.exclusion_report", "in_file")
-        ])
-    ])
-
-    # save the session-level tmask
-    tmask_to_tsv_node = Node(
-        Function(
-            function=make_tmask_tsv,
-            input_names=["tmask_file", "fd_threshold", "execute"],
-            output_names=["tmask_tsv"]
-        ),
-        name=f"{func_space}_tmask_to_tsv_node"
-    )
-    tmask_to_tsv_node.inputs.fd_threshold = all_opts.fd_threshold
-    tmask_ds = Node(
-        FLADataSink(
-            base_directory=all_opts.datasink_path.parent,
-            out_path_base=all_opts.datasink_path.name,
-            extra_bids_patterns=all_opts.bids_patterns,
-            dismiss_entities=["desc", "run", "den"],
-            suffix="tmask",
-            task=all_opts.task_rename,
-            source_file=bold_runs_list
-        ),
-        name=f"{func_space}_tmask_ds"
-    )
-    workflow.connect([
-        (regression_wf, tmask_to_tsv_node, [
-            ("outputnode.execute", "execute")
-        ]),
-        (regression_wf, tmask_to_tsv_node, [
-            ("outputnode.tmask_file", "tmask_file")
-        ]),
-        (tmask_to_tsv_node, tmask_ds, [
-            ("tmask_tsv", "in_file")
-        ]),
-        (regression_wf, tmask_ds, [
-            ("outputnode.execute", "execute")
-        ])
-    ])
-
-    unmasked_design_ds = Node(
-        FLADataSink(
-            base_directory=all_opts.datasink_path.parent,
-            out_path_base=all_opts.datasink_path.name,
-            extra_bids_patterns=all_opts.bids_patterns,
-            dismiss_entities=["run", "den"],
-            desc="unmasked",
-            space=func_space,
-            suffix="design",
-            task=all_opts.task_rename,
-            source_file=bold_runs_list
-        ),
-        name=f"{func_space}_unmasked_design_ds"
-    )
-    workflow.connect([
-        (regression_wf, unmasked_design_ds, [
-            ("outputnode.unmasked_design_matrix", "in_file"),
-            ("outputnode.execute", "execute")
-        ])
-    ])
-
-
     return workflow
 
 
@@ -1072,24 +1205,40 @@ def build_run_workflow(run, task: str, func_space:str, file_extension: str):
                 "bold_file",
                 "tmask_file",
                 "nuisance_design",
+                "tr",
                 "lh_surf",
                 "rh_surf",
                 "include"
             ]
         ),
-        name="inputnode"
+        name="main_inputnode"
     )
+
+    input_func_source_node = Node(
+        IdentityInterface(
+            fields=[
+                "out_file"
+            ]
+        ),
+        name="input_func_source_node"
+    )
+    workflow.connect([
+        (inputnode, input_func_source_node, [
+            ("bold_file", "out_file")
+        ])
+    ])
 
     outputnode = Node(
         IdentityInterface(
             fields=[
-                "bold_file",
+                "processed_bold",
             ]
         ),
-        name="outputnode"
+        name="final_outputnode"
     )
     compress_files = file_extension.endswith(".gz")
     last_func_node = inputnode
+    last_func_source_node = input_func_source_node
 
     ### Smooth the data if requested ###
     if all_opts.fwhm:
@@ -1118,20 +1267,40 @@ def build_run_workflow(run, task: str, func_space:str, file_extension: str):
                 compress=compress_files,
                 dismiss_entities=["den"],
                 desc="smooth",
-                allowed_entities=("fwhm"),
-                fwhm=str(all_opts.fwhm).replace(".", "p")
+                fwhm=f"{all_opts.fwhm:.2f} mm"
             ),
                 name="smoothed_bold_ds"
             )
+            smoothed_sources_node = Node(
+                BIDSSource(
+                    raw_dataset=all_opts.raw_bids,
+                    preprocessed_dataset=all_opts.preproc_bids,
+                    datasink_path=all_opts.datasink_path,
+                    work_path=all_opts.work
+                ),
+                name="smoothed_bold_sources_node"
+            )
             workflow.connect([
+                (last_func_source_node, smoothed_sources_node, [
+                    ("out_file", "file_1")
+                ]),
+                (inputnode, smoothed_sources_node, [
+                    ("lh_surf", "file_2"),
+                    ("rh_surf", "file_3")
+                ]),
+                (smoothed_sources_node, smoothed_ds, [
+                    ("sources", "Sources")
+                ]),
                 (smoothing_wf, smoothed_ds, [
                     ("outputnode.bold_file", "in_file"),
                 ]),
                 (inputnode, smoothed_ds, [
                     ("bold_file", "source_file"),
-                    ("include", "execute")
+                    ("include", "execute"),
+                    ("tr", "RepetitionTime")
                 ])
             ])
+            last_func_source_node = smoothed_ds
 
     ### Percent signal change ###
     if all_opts.percent_change:
@@ -1164,15 +1333,35 @@ def build_run_workflow(run, task: str, func_space:str, file_extension: str):
             ),
                 name="percent_change_bold_ds"
             )
+            percent_change_sources_node = Node(
+                BIDSSource(
+                    raw_dataset=all_opts.raw_bids,
+                    preprocessed_dataset=all_opts.preproc_bids,
+                    datasink_path=all_opts.datasink_path,
+                    work_path=all_opts.work
+                ),
+                name="percent_change_sources_node"
+            )
             workflow.connect([
+                (last_func_source_node, percent_change_sources_node, [
+                    ("out_file", "file_1")
+                ]),
+                (inputnode, percent_change_sources_node, [
+                    ("tmask_file", "file_2")
+                ]),
+                (percent_change_sources_node, percent_change_ds, [
+                    ("sources", "Sources")
+                ]),
                 (percent_change_node, percent_change_ds, [
                     ("bold_file", "in_file")
                 ]),
                 (inputnode, percent_change_ds, [
                     ("bold_file", "source_file"),
-                    ("include", "execute")
+                    ("include", "execute"),
+                    ("tr", "RepetitionTime")
                 ])
             ])
+            last_func_source_node = percent_change_ds
 
     ### Nuisance regression ###
     if all_opts.nuisance_regression:
@@ -1183,9 +1372,9 @@ def build_run_workflow(run, task: str, func_space:str, file_extension: str):
             need_intercept=all_opts.exclude_run_mean
         )
 
-        reporting_wf = build_reporting_workflow(
-            task=task,
-            run=run
+        plot_nuisance_matrix_node = Node(
+            PlotDesign(),
+            name="plot_nuisance_design_node"
         )
 
         run_design_ds = Node(
@@ -1202,11 +1391,6 @@ def build_run_workflow(run, task: str, func_space:str, file_extension: str):
             name=f"task_{task}_run_{run}_design_ds"
         )
 
-        run_design_merging_node = Node(
-            MergeUnique(),
-            name=f"task_{task}_run_{run}_merge_design_files_node"
-        )
-
         workflow.connect([
             (last_func_node, regression_wf, [
                 ("bold_file", "inputnode.bold_files")
@@ -1216,22 +1400,15 @@ def build_run_workflow(run, task: str, func_space:str, file_extension: str):
                 ("tmask_file", "inputnode.tmask_files"),
                 ("include", "inputnode.execute")
             ]),
-            (regression_wf, reporting_wf, [
-                ("outputnode.design_matrix", "inputnode.design_matrix"),
-                # ("outputnode.tmask_file", "inputnode.final_tmask_file"),
-                ("outputnode.execute", "inputnode.execute")
+            (regression_wf, plot_nuisance_matrix_node, [
+                ("outputnode.design_matrix", "design_matrix"),
+                ("outputnode.execute", "execute")
             ]),
-            (regression_wf, run_design_merging_node, [
-                ("outputnode.design_matrix", "design_x1"),
-            ]),
-            (reporting_wf, run_design_merging_node, [
-                ("outputnode.design_plot", "design_x2"),
-            ]),
-            (run_design_merging_node, run_design_ds, [
-                ("design", "in_file")
+            (plot_nuisance_matrix_node, run_design_ds, [
+                ("design_plot", "in_file")
             ]),
             (regression_wf, run_design_ds, [
-                ("outputnode.execute", "execute"),
+                ("outputnode.execute", "execute")
             ]),
             (inputnode, run_design_ds, [
                 ("bold_file", "source_file")
@@ -1250,16 +1427,52 @@ def build_run_workflow(run, task: str, func_space:str, file_extension: str):
             ),
                 name="regressed_bold_ds"
             )
+            nuisance_regressed_sources_node = Node(
+                BIDSSource(
+                    raw_dataset=all_opts.raw_bids,
+                    preprocessed_dataset=all_opts.preproc_bids,
+                    datasink_path=all_opts.datasink_path,
+                    work_path=all_opts.work
+                ),
+                name="nuisance_regressed_sources_node"
+            )
             workflow.connect([
+                (last_func_source_node, nuisance_regressed_sources_node, [
+                    ("out_file", "file_1")
+                ]),
+                (inputnode, nuisance_regressed_sources_node, [
+                    ("nuisance_design", "file_2"),
+                    ("tmask_file", "file_3")
+                ]),
+                (nuisance_regressed_sources_node, regressed_bold_ds, [
+                    ("sources", "Sources")
+                ]),
                 (regression_wf, regressed_bold_ds, [
                     ("outputnode.bold_file", "in_file")
                 ]),
                 (inputnode, regressed_bold_ds, [
                     ("bold_file", "source_file"),
-                    ("include", "execute")
+                    ("include", "execute"),
+                    ("tr", "RepetitionTime")
                 ])
             ])
-
+            combine_betas_node = Node(
+                CombineFIRBetas(
+                    fir_count=all_opts.fir,
+                    volterra_count=all_opts.volterra_lag,
+                    brain_mask=all_opts.brain_mask,
+                ),
+                name="combine_betas_node"
+            )
+            nuisance_betas_sources_node = Node(
+                BIDSSource(
+                    raw_dataset=all_opts.raw_bids,
+                    preprocessed_dataset=all_opts.preproc_bids,
+                    datasink_path=all_opts.datasink_path,
+                    work_path=all_opts.work
+                ),
+                name="nuisance_betas_sources_node"
+            )
             nuisance_betas_ds = Node(FLADataSink(
                 base_directory=all_opts.datasink_path.parent,
                 out_path_base=all_opts.datasink_path.name,
@@ -1269,20 +1482,37 @@ def build_run_workflow(run, task: str, func_space:str, file_extension: str):
                 desc="nuisanceRegression",
                 suffix="boldmap",
                 stat="effect",
-                allowed_entities=("condition", "stat", "den")
+                allowed_entities=("condition", "stat"),
+                Test="OLS"
             ),
                 name="nuisance_betas_ds"
             )
             workflow.connect([
-                (regression_wf, nuisance_betas_ds, [
-                    ("outputnode.beta_files", "in_file"),
-                    ("outputnode.beta_labels", "condition")
+                (last_func_source_node, nuisance_betas_sources_node, [
+                    ("out_file", "file_1")
+                ]),
+                (inputnode, nuisance_betas_sources_node, [
+                    ("nuisance_design", "file_2"),
+                    ("tmask_file", "file_3")
+                ]),
+                (regression_wf, combine_betas_node, [
+                    ("outputnode.beta_files", "beta_files"),
+                    ("outputnode.beta_labels", "beta_labels"),
+                    ("outputnode.execute", "execute")
+                ]),
+                (nuisance_betas_sources_node, nuisance_betas_ds, [
+                    ("sources", "Sources")
+                ]),
+                (combine_betas_node, nuisance_betas_ds, [
+                    ("beta_files", "in_file"),
+                    ("beta_labels", "condition")
                 ]),
                 (inputnode, nuisance_betas_ds, [
                     ("bold_file", "source_file"),
                     ("include", "execute")
                 ])
             ])
+            last_func_source_node = regressed_bold_ds
 
     ### Bandpass filter ###
     if all_opts.highpass or all_opts.lowpass:
@@ -1297,36 +1527,17 @@ def build_run_workflow(run, task: str, func_space:str, file_extension: str):
             ),
             name="filtering_node"
         )
-
-        get_metadata_node = Node(
-            ReadMetadataFile(
-                fields=["RepetitionTime"],
-                error_on_missing=True,
-            ),
-            name="get_metadata_node"
-        )
-
         workflow.connect([
             (last_func_node, filter_node, [
                 ("bold_file", "bold_in")
             ]),
             (inputnode, filter_node, [
                 ("tmask_file", "tmask_in"),
+                ("tr", "tr"),
                 ("include", "execute")
             ]),
         ])
-
-        if all_opts.repetition_time:
-            filter_node.inputs.tr = all_opts.repetition_time
-        else:
-            workflow.connect([
-                (inputnode, get_metadata_node, [
-                    ("bold_file", "bids_file"),
-                ]),
-                (get_metadata_node, filter_node, [
-                    ("RepetitionTime", "tr")
-                ])
-            ])
+        last_func_node = filter_node
 
         if all_opts.save_intermediates:
             filter_ds = Node(FLADataSink(
@@ -1334,34 +1545,59 @@ def build_run_workflow(run, task: str, func_space:str, file_extension: str):
                 out_path_base=all_opts.datasink_path.name,
                 extra_bids_patterns=all_opts.bids_patterns,
                 compress=compress_files,
-                allowed_entites=("hp", "lp"),
                 dismiss_entities=["den"],
                 desc="filtered",
             ),
                 name="filtered_bold_ds"
             )
+            filtered_sources_node = Node(
+                BIDSSource(
+                    raw_dataset=all_opts.raw_bids,
+                    preprocessed_dataset=all_opts.preproc_bids,
+                    datasink_path=all_opts.datasink_path,
+                    work_path=all_opts.work
+                ),
+                name="filtered_sources_node"
+            )
             if all_opts.highpass:
-                filter_ds.inputs.hp = str(all_opts.highpass).replace(".", "p")
+                filter_ds.inputs.Highpass = f"{all_opts.highpass:.3f} Hz"
             if all_opts.lowpass:
-                filter_ds.inputs.lp = str(all_opts.lowpass).replace(".", "p")
+                filter_ds.inputs.Lowpass = f"{all_opts.lowpass:.3f} Hz"
 
             workflow.connect([
+                (last_func_source_node, filtered_sources_node, [
+                    ("out_file", "file_1"),
+                ]),
+                (inputnode, filtered_sources_node, [
+                    ("tmask_file", "file_2")
+                ]),
+                (filtered_sources_node, filter_ds, [
+                    ("sources", "Sources")
+                ]),
                 (filter_node, filter_ds, [
                     ("bold_file", "in_file")
                 ]),
                 (inputnode, filter_ds, [
                     ("bold_file", "source_file"),
-                    ("include", "execute")
+                    ("include", "execute"),
+                    ("tr", "RepetitionTime")
                 ])
             ])
-        last_func_node = filter_node
+            last_func_source_node = filter_ds
 
     ### Connect final bold output ###
-    workflow.connect([
-        (last_func_node, outputnode, [
-            ("bold_file", "bold_file")
+    if all_opts.save_intermediates:
+        workflow.connect([
+            (last_func_source_node, outputnode, [
+                ("out_file", "processed_bold")
+            ])
         ])
-    ])
+    else:
+        workflow.connect([
+            (last_func_node, outputnode, [
+                ("bold_file", "processed_bold")
+            ])
+        ])
 
     return workflow
 

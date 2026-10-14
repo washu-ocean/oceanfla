@@ -152,7 +152,7 @@ def make_exclusion_report(task: str,
     for i in range(lengths[0]):
         excl_df = pd.read_csv(exclusion_tables[i])
         fd = pd.read_csv(confounds_files[i], sep="\t")["framewise_displacement"].to_numpy()
-        tmask = np.loadtxt(tmask_files[i]).astype(bool)
+        tmask = pd.read_csv(tmask_files[i], sep="\t")["tmask"].to_numpy().astype(bool)
         avg_fd = np.nanmean(fd)
         avg_masked_fd = np.nanmean(fd[tmask])
         excl_df.loc[0, "Avg FD (mm)"] = avg_fd
@@ -194,7 +194,7 @@ def make_exclusion_report(task: str,
             raise ValueError(
                 "Session-level GLM was run, but no session-level tmask was provided"
             )
-        ses_level_tmask = np.loadtxt(ses_tmask).astype(bool)
+        ses_level_tmask = pd.read_csv(ses_tmask, sep="\t")["tmask"].to_numpy().astype(bool)
         if ses_level_tmask.shape[0] != total_frame_count:
             raise RuntimeError(
                 f"Length of session tmask and reported frames is different"

@@ -114,7 +114,7 @@ def generate_nuisance_matrix(confounds_file: str,
                 for lag in range(1, volterra_lag+1):
                     nuisance.insert(
                         loc=nuisance.columns.get_loc(vc)+lag, 
-                        column=f"{vc}_{lag}", 
+                        column=f"{vc}_volterra{lag:02d}", 
                         value=nuisance.loc[:, vc].shift(lag),
                         allow_duplicates=False)
         nuisance.fillna(0, inplace=True)

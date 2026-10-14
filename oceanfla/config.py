@@ -75,6 +75,7 @@ all_opts = Options()
 
 def set_configs(args):
     all_opts.__init__(args)
+    generate_processing_text()
 
 
 def get_layout_for_file(file) -> bids.BIDSLayout:
@@ -218,3 +219,59 @@ def close_layouts():
     del all_opts.layouts[:]
 
 
+def generate_processing_text():
+    logger = get_logger("nipype.utils")
+
+    if not all_opts._initialized:
+        logger.info("Cannot generate processing text because global options have not been initialized yet.")
+        return
+
+    description = (
+        f"\nOceanfla started by finding all available bold files, and the corresponding confounds files, matching "
+        f"the input task(s) <{all_opts.task}> and the input template space <{all_opts.func_space}> from the directory "
+        f"at {all_opts.preproc_bids.resolve()}. Next, all event files matching the input task(s) were found from the "
+        f"directory at {all_opts.raw_bids.resolve()}, and run-level design and nuisance matrices were created. Using " 
+        f"the confounds files, tmasks were made for each run with a framewise displacement threshold of {all_opts.fd_threshold}. "
+        f"This concluded the processing that is template-space independent. Before run-level functional processing "
+        f"was carried out, the exclusion criteria for minimum tSNR <{all_opts.min_average_tsnr}>, minimum frames per "
+        f"run <{all_opts.min_run_frames}>, and minimum frame retention percentage <{all_opts.run_exclusion_threshold}%> "
+        f"were checked for each run. Runs that passed these exclusion criteria underwent run-level functional processing."
+        "\n\nFor each passing, functional run of the specified template space, the following operations took place in this order:"
+    )
+
+    step = 1
+    if all_opts.fwhm:
+        description += f"\n\t{step}) Smoothing using wb_command (-cifti-smoothing or -volume-smoothing) with fwhm={all_opts.fwhm}"
+        step += 1
+
+    if all_opts.percent_change:
+        description += f"\n\t{step}) Voxel/Vertex wise conversion to percent signal change"
+        step += 1
+
+    if all_opts.nuisance_regression:
+        description += f"\n\t{step}) Nuisance regression for the following regressors and their expansions if requested:"
+        description += f"\n\t\t{', '.join(all_opts.nuisance_regression)}"
+        step += 1
+
+    if all_opts.highpass or all_opts.lowpass:
+        filter_type = None
+        filter_params = []
+        if all_opts.highpass:
+            filter_type = "Highpass"
+            filter_params.append(f"{all_opts.highpass:.3f} Hz")
+        if all_opts.lowpass:
+            filter_params.append(f"{all_opts.lowpass:.3f} Hz")
+            if filter_type is None:
+                filter_type = "Lowpass"
+            else:
+                filter_type = "Bandpass"
+        filter_params = " and ".join(filter_params)
+        description += f"\n\t{step}) {filter_type} filtering at {filter_params}"
+    
+    description += (
+        "\n\nEach processed, functional run, their accompanying design matrix, and corresponding tmask were then "
+        "concatenated across runs. A general linear model was fit via Moore-Penrose pseudo-inverse using the concatenated "
+        "files, and a Wald's T-test was run for each resulting beta estimate.\n"
+    )
+
+    logger.info(description)
