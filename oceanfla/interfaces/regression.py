@@ -788,7 +788,7 @@ def combine_fir_betas(beta_files: list[str],
                 continue
             sorted_files = [file_map[blabel] for blabel in sorted_labels]
             combined_data = np.array([load_data(f, brain_mask=brain_mask)[0,:] for f in sorted_files])
-            new_entities = {"path":None, "beta":condition}
+            new_entities = {"path":None, "beta":f"{condition}{scalar_desc}"}
             new_combo_file = replace_entities(
                 file=sorted_files[0],
                 entities=new_entities

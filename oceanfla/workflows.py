@@ -1098,11 +1098,11 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
             ("beta_labels", "condition"),
         ]),
         (combine_betas_node, t_stat_ds, [
-            ("beta_files", "in_file"),
+            ("tstat_files", "in_file"),
             ("beta_labels", "condition"),
         ]),
         (combine_betas_node, p_val_ds, [
-            ("beta_files", "in_file"),
+            ("pval_files", "in_file"),
             ("beta_labels", "condition"),
         ]),
     ])
